@@ -61,8 +61,19 @@ const TABS = {
     SEARCH: 'search',
 };
 
-// ✅ مكون Wrapper لـ Tooltip مع دعم ref
-const TooltipWrapper = forwardRef(({ title, children, ...props }, ref) => {
+// ✅ مكون Wrapper لـ Tooltip يتعامل مع العناصر المعطلة
+const TooltipWrapper = forwardRef(({ title, children, disabled, ...props }, ref) => {
+    // إذا كان الزر معطلاً، نلفه بـ span لضمان عمل الـ Tooltip
+    if (disabled) {
+        return (
+            <Tooltip title={title} {...props}>
+                <span style={{ display: 'inline-flex' }}>
+                    {children}
+                </span>
+            </Tooltip>
+        );
+    }
+    
     if (!children) return null;
     
     if (React.isValidElement(children)) {
@@ -477,12 +488,13 @@ export default function MapPage() {
                                     </Typography>
                                 </Box>
                                 <Box display="flex" gap={0.5}>
-                                    <Tooltip title="تحديث الخريطة">
+                                    <TooltipWrapper title="تحديث الخريطة">
                                         <IconButton onClick={refreshAllData} disabled={driversLoading} size="small">
                                             <Refresh />
                                         </IconButton>
-                                    </Tooltip>
-                                    <Tooltip title="الفلاتر">
+                                    </TooltipWrapper>
+                                    
+                                    <TooltipWrapper title="الفلاتر">
                                         <IconButton 
                                             onClick={() => setShowDriverFilters(!showDriverFilters)}
                                             color={showDriverFilters ? 'primary' : 'default'}
@@ -490,22 +502,25 @@ export default function MapPage() {
                                         >
                                             <FilterList />
                                         </IconButton>
-                                    </Tooltip>
-                                    <Tooltip title="تكبير">
+                                    </TooltipWrapper>
+                                    
+                                    <TooltipWrapper title="تكبير">
                                         <IconButton onClick={handleZoomIn} size="small">
                                             <ZoomIn />
                                         </IconButton>
-                                    </Tooltip>
-                                    <Tooltip title="تصغير">
+                                    </TooltipWrapper>
+                                    
+                                    <TooltipWrapper title="تصغير">
                                         <IconButton onClick={handleZoomOut} size="small">
                                             <ZoomOut />
                                         </IconButton>
-                                    </Tooltip>
-                                    <Tooltip title="موقعي">
+                                    </TooltipWrapper>
+                                    
+                                    <TooltipWrapper title="موقعي">
                                         <IconButton onClick={getUserLocation} size="small">
                                             <MyLocation />
                                         </IconButton>
-                                    </Tooltip>
+                                    </TooltipWrapper>
                                 </Box>
                             </Box>
                             
@@ -656,21 +671,21 @@ export default function MapPage() {
                                     تتبع الطلب {selectedOrder && `#${selectedOrder._id.slice(-6)}`}
                                 </Typography>
                                 <Box display="flex" gap={0.5}>
-                                    <Tooltip title="تحديث الخريطة">
+                                    <TooltipWrapper title="تحديث الخريطة">
                                         <IconButton onClick={refreshAllData} size="small">
                                             <Refresh />
                                         </IconButton>
-                                    </Tooltip>
-                                    <Tooltip title="تكبير">
+                                    </TooltipWrapper>
+                                    <TooltipWrapper title="تكبير">
                                         <IconButton onClick={handleZoomIn} size="small">
                                             <ZoomIn />
                                         </IconButton>
-                                    </Tooltip>
-                                    <Tooltip title="تصغير">
+                                    </TooltipWrapper>
+                                    <TooltipWrapper title="تصغير">
                                         <IconButton onClick={handleZoomOut} size="small">
                                             <ZoomOut />
                                         </IconButton>
-                                    </Tooltip>
+                                    </TooltipWrapper>
                                 </Box>
                             </Box>
                             <OrderTrackingMap
@@ -759,13 +774,13 @@ export default function MapPage() {
                                     المتاجر القريبة
                                 </Typography>
                                 <Box display="flex" gap={0.5}>
-                                    <Tooltip title="تحديث الخريطة">
+                                    <TooltipWrapper title="تحديث الخريطة">
                                         <IconButton onClick={refreshAllData} disabled={isStoresFetching} size="small">
                                             <Refresh />
                                         </IconButton>
-                                    </Tooltip>
+                                    </TooltipWrapper>
                                     {storesWithoutCoords.length > 0 && !isMobile && (
-                                        <Tooltip title={`تحديث مواقع ${storesWithoutCoords.length} متجر`}>
+                                        <TooltipWrapper title={`تحديث مواقع ${storesWithoutCoords.length} متجر`}>
                                             <IconButton 
                                                 onClick={handleUpdateStoresCoordinates} 
                                                 disabled={updatingStores}
@@ -774,9 +789,9 @@ export default function MapPage() {
                                             >
                                                 <Update />
                                             </IconButton>
-                                        </Tooltip>
+                                        </TooltipWrapper>
                                     )}
-                                    <Tooltip title="موقعي">
+                                    <TooltipWrapper title="موقعي">
                                         <IconButton 
                                             onClick={getUserLocation} 
                                             disabled={loadingLocation}
@@ -784,17 +799,17 @@ export default function MapPage() {
                                         >
                                             {loadingLocation ? <CircularProgress size={20} /> : <MyLocation />}
                                         </IconButton>
-                                    </Tooltip>
-                                    <Tooltip title="تكبير">
+                                    </TooltipWrapper>
+                                    <TooltipWrapper title="تكبير">
                                         <IconButton onClick={handleZoomIn} size="small">
                                             <ZoomIn />
                                         </IconButton>
-                                    </Tooltip>
-                                    <Tooltip title="تصغير">
+                                    </TooltipWrapper>
+                                    <TooltipWrapper title="تصغير">
                                         <IconButton onClick={handleZoomOut} size="small">
                                             <ZoomOut />
                                         </IconButton>
-                                    </Tooltip>
+                                    </TooltipWrapper>
                                 </Box>
                             </Box>
                             

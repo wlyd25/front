@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react'; // ✅ أضف React هنا
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import {
   Box,
@@ -27,6 +27,7 @@ import {
   ListItem,
   ListItemText,
   ListItemAvatar,
+  CircularProgress, // ✅ أضف هذا أيضاً
 } from '@mui/material';
 import {
   Add,
@@ -183,59 +184,62 @@ export default function Users() {
 
     return (
       <List sx={{ width: '100%' }}>
-        {users.map((user) => (
-          <Card key={user._id} sx={{ mb: 1.5, p: 1.5 }}>
-            <Box display="flex" alignItems="center" gap={2}>
-              <Avatar src={user.image} sx={{ width: 48, height: 48 }}>
-                {user.name?.charAt(0)}
-              </Avatar>
-              <Box flex={1}>
-                <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
-                  <Typography variant="subtitle2" fontWeight="bold">
-                    {user.name}
+        {users.map((user) => {
+          const RoleIcon = roleConfig[user.role]?.icon || Person;
+          return (
+            <Card key={user._id} sx={{ mb: 1.5, p: 1.5 }}>
+              <Box display="flex" alignItems="center" gap={2}>
+                <Avatar src={user.image} sx={{ width: 48, height: 48 }}>
+                  {user.name?.charAt(0)}
+                </Avatar>
+                <Box flex={1}>
+                  <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
+                    <Typography variant="subtitle2" fontWeight="bold">
+                      {user.name}
+                    </Typography>
+                    {user.isVerified && (
+                      <CheckCircle sx={{ fontSize: 14, color: '#4caf50' }} />
+                    )}
+                  </Box>
+                  <Typography variant="caption" color="textSecondary" display="block">
+                    {user.phone}
                   </Typography>
-                  {user.isVerified && (
-                    <CheckCircle sx={{ fontSize: 14, color: '#4caf50' }} />
-                  )}
+                  <Typography variant="caption" color="textSecondary" display="block">
+                    {user.email}
+                  </Typography>
+                  <Box display="flex" gap={1} mt={1} flexWrap="wrap">
+                    <Chip
+                      icon={<RoleIcon />}
+                      label={roleConfig[user.role]?.name || user.role}
+                      size="small"
+                      sx={{
+                        backgroundColor: roleConfig[user.role]?.bgColor,
+                        color: roleConfig[user.role]?.color,
+                      }}
+                    />
+                    <Chip
+                      label={user.isActive ? 'نشط' : 'غير نشط'}
+                      size="small"
+                      color={user.isActive ? 'success' : 'error'}
+                      variant="outlined"
+                    />
+                  </Box>
                 </Box>
-                <Typography variant="caption" color="textSecondary" display="block">
-                  {user.phone}
-                </Typography>
-                <Typography variant="caption" color="textSecondary" display="block">
-                  {user.email}
-                </Typography>
-                <Box display="flex" gap={1} mt={1} flexWrap="wrap">
-                  <Chip
-                    icon={React.createElement(roleConfig[user.role]?.icon || Person)}
-                    label={roleConfig[user.role]?.name || user.role}
-                    size="small"
-                    sx={{
-                      backgroundColor: roleConfig[user.role]?.bgColor,
-                      color: roleConfig[user.role]?.color,
-                    }}
-                  />
-                  <Chip
-                    label={user.isActive ? 'نشط' : 'غير نشط'}
-                    size="small"
-                    color={user.isActive ? 'success' : 'error'}
-                    variant="outlined"
-                  />
+                <Box>
+                  <IconButton size="small" onClick={() => handleViewDetails(user)}>
+                    <Visibility fontSize="small" />
+                  </IconButton>
+                  <IconButton size="small" onClick={() => handleEdit(user)}>
+                    <Edit fontSize="small" />
+                  </IconButton>
+                  <IconButton size="small" onClick={() => handleToggleStatus(user)}>
+                    {user.isActive ? <Block fontSize="small" /> : <CheckCircle fontSize="small" />}
+                  </IconButton>
                 </Box>
               </Box>
-              <Box>
-                <IconButton size="small" onClick={() => handleViewDetails(user)}>
-                  <Visibility fontSize="small" />
-                </IconButton>
-                <IconButton size="small" onClick={() => handleEdit(user)}>
-                  <Edit fontSize="small" />
-                </IconButton>
-                <IconButton size="small" onClick={() => handleToggleStatus(user)}>
-                  {user.isActive ? <Block fontSize="small" /> : <CheckCircle fontSize="small" />}
-                </IconButton>
-              </Box>
-            </Box>
-          </Card>
-        ))}
+            </Card>
+          );
+        })}
       </List>
     );
   };
@@ -490,7 +494,7 @@ export default function Users() {
         )}
       </Paper>
 
-      {/* باقي الحوارات كما هي */}
+      {/* نموذج إضافة/تعديل مستخدم */}
       <Dialog open={openForm} onClose={() => setOpenForm(false)} maxWidth="md" fullWidth>
         <DialogTitle>{selectedUser ? 'تعديل مستخدم' : 'إضافة مستخدم جديد'}</DialogTitle>
         <DialogContent>
@@ -506,6 +510,7 @@ export default function Users() {
         </DialogContent>
       </Dialog>
 
+      {/* تفاصيل المستخدم */}
       <Dialog open={openDetails} onClose={() => setOpenDetails(false)} maxWidth="md" fullWidth>
         <DialogTitle>تفاصيل المستخدم</DialogTitle>
         <DialogContent dividers>
@@ -516,6 +521,7 @@ export default function Users() {
         </DialogActions>
       </Dialog>
 
+      {/* حوار تأكيد الحذف */}
       <Dialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)}>
         <DialogTitle>تأكيد الحذف</DialogTitle>
         <DialogContent>
@@ -527,11 +533,10 @@ export default function Users() {
         </DialogActions>
       </Dialog>
 
+      {/* إشعارات */}
       <Snackbar open={snackbar.open} autoHideDuration={6000} onClose={() => setSnackbar({ ...snackbar, open: false })}>
         <Alert severity={snackbar.severity}>{snackbar.message}</Alert>
       </Snackbar>
     </Box>
   );
 }
-
-import { CircularProgress } from '@mui/material';

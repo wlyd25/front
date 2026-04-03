@@ -14,11 +14,14 @@ export default defineConfig({
     assetsDir: 'assets',
     rollupOptions: {
       output: {
-        entryFileNames: 'assets/[name].js',
-        chunkFileNames: 'assets/[name].js',
-        assetFileNames: 'assets/[name].[ext]'
+        // ✅ تأكد من أن الملفات تنشأ بشكل صحيح
+        entryFileNames: 'assets/[name].[hash].js',
+        chunkFileNames: 'assets/[name].[hash].js',
+        assetFileNames: 'assets/[name].[hash].[ext]'
       }
-    }
+    },
+    // ✅ تأكد من تحويل CSS بشكل صحيح
+    cssCodeSplit: true,
   },
   resolve: {
     alias: {
