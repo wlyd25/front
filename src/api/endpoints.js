@@ -130,6 +130,7 @@ export const adminEndpoints = {
   advancedStatsCustom: '/admin/advanced-stats/custom',
 };
 
+
 // ==================== دوال مساعدة ====================
 export const buildUrl = (endpoint, params = {}) => {
   const url = new URL(endpoint, window.location.origin);
@@ -141,17 +142,48 @@ export const buildUrl = (endpoint, params = {}) => {
   return url.pathname + url.search;
 };
 
-// ✅ دالة مساعدة للحصول على id بأمان (تدعم _id و id)
+/**
+ * الحصول على ID بأمان (يدعم _id و id)
+ * @param {Object} item - العنصر
+ * @returns {string|null} - الـ ID أو null
+ */
 export const getId = (item) => {
   if (!item) return null;
   return item._id || item.id || null;
 };
 
-// ✅ دالة لتوحيد المصفوفات (تحويل id إلى _id)
+/**
+ * توحيد المصفوفات (تحويل id إلى _id)
+ * @param {Array} items - المصفوفة
+ * @returns {Array} - مصفوفة مع توحيد الـ IDs
+ */
 export const normalizeItems = (items) => {
   if (!Array.isArray(items)) return [];
   return items.map(item => ({
     ...item,
     _id: item._id || item.id,
   }));
+};
+
+/**
+ * الحصول على قيمة بأمان من كائن
+ * @param {Object} obj - الكائن
+ * @param {string} path - المسار
+ * @param {any} defaultValue - القيمة الافتراضية
+ * @returns {any}
+ */
+export const getSafeValue = (obj, path, defaultValue = '') => {
+  if (!obj || !path) return defaultValue;
+  
+  const keys = path.split('.');
+  let result = obj;
+  
+  for (const key of keys) {
+    if (result === undefined || result === null) {
+      return defaultValue;
+    }
+    result = result[key];
+  }
+  
+  return result !== undefined && result !== null ? result : defaultValue;
 };

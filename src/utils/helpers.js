@@ -150,3 +150,50 @@ export const extractErrorMessage = (error) => {
   }
   return 'حدث خطأ غير متوقع';
 };
+
+/**
+ * الحصول على قيمة بأمان من كائن
+ * @param {Object} obj - الكائن
+ * @param {string} path - المسار (مثل 'user.name')
+ * @param {any} defaultValue - القيمة الافتراضية
+ * @returns {any}
+ */
+export const getSafeValue = (obj, path, defaultValue = '') => {
+  if (!obj || !path) return defaultValue;
+  
+  const keys = path.split('.');
+  let result = obj;
+  
+  for (const key of keys) {
+    if (result === undefined || result === null) {
+      return defaultValue;
+    }
+    result = result[key];
+  }
+  
+  return result !== undefined && result !== null ? result : defaultValue;
+};
+
+/**
+ * تنسيق رقم الهاتف بأمان
+ * @param {string} phone - رقم الهاتف
+ * @returns {string}
+ */
+export const formatPhoneSafe = (phone) => {
+  if (!phone) return '-';
+  return String(phone);
+};
+
+/**
+ * تنسيق التاريخ بأمان
+ * @param {any} date - التاريخ
+ * @returns {string}
+ */
+export const formatDateSafe = (date) => {
+  if (!date) return '-';
+  try {
+    return new Date(date).toLocaleDateString('ar-SA');
+  } catch {
+    return '-';
+  }
+};

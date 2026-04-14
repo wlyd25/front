@@ -1,3 +1,5 @@
+// vite.config.js
+
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -14,6 +16,15 @@ export default defineConfig({
     assetsDir: 'assets',
     rollupOptions: {
       output: {
+        // ✅ تحسين تجزئة الملفات لتقليل حجم الحزمة
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'mui-vendor': ['@mui/material', '@mui/icons-material', '@emotion/react', '@emotion/styled'],
+          'chart-vendor': ['recharts'],
+          'map-vendor': ['mapbox-gl'],
+          'form-vendor': ['formik', 'yup'],
+          'query-vendor': ['react-query'],
+        },
         // ✅ تأكد من أن الملفات تنشأ بشكل صحيح
         entryFileNames: 'assets/[name].[hash].js',
         chunkFileNames: 'assets/[name].[hash].js',
@@ -22,6 +33,9 @@ export default defineConfig({
     },
     // ✅ تأكد من تحويل CSS بشكل صحيح
     cssCodeSplit: true,
+    // ✅ تحسين حجم الملفات
+    target: 'es2020',
+    chunkSizeWarningLimit: 1000,
   },
   resolve: {
     alias: {
@@ -29,4 +43,8 @@ export default defineConfig({
     },
   },
   base: '/',
+  // ✅ تحسين الأداء
+  optimizeDeps: {
+    include: ['react', 'react-dom', 'react-router-dom', '@mui/material', '@mui/icons-material'],
+  },
 });
