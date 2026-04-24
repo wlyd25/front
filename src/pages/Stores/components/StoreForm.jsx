@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import {
@@ -21,6 +21,8 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
+  Avatar,
+  Badge,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -30,8 +32,11 @@ import {
   DeliveryDining as DeliveryIcon,
   Schedule as ScheduleIcon,
   Map as MapIcon,
+  CloudUpload as CloudUploadIcon,
+  PhotoCamera as PhotoCameraIcon,
+  Clear as ClearIcon,
 } from '@mui/icons-material';
-import { storesService } from '../../../api';
+import { storesService, vendorsService } from '../../../api';
 
 const validationSchema = Yup.object({
   name: Yup.string()
@@ -42,6 +47,7 @@ const validationSchema = Yup.object({
     .max(500, 'الوصف طويل جداً')
     .required('الوصف مطلوب'),
   category: Yup.string().required('التصنيف مطلوب'),
+  vendorId: Yup.string().required('التاجر مطلوب'),  
   phone: Yup.string()
     .required('رقم الهاتف مطلوب')
     .matches(/^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{4,6}$/, 'رقم الهاتف غير صالح'),
@@ -104,7 +110,71 @@ export default function StoreForm({ store, onSuccess, onCancel }) {
     delivery: false,
     hours: false,
   });
+  
+  // ✅ States لرفع الملفات
+  const [logoFile, setLogoFile] = useState(null);
+  const [coverFile, setCoverFile] = useState(null);
+  const [logoPreview, setLogoPreview] = useState(store?.logo || null);
+  const [coverPreview, setCoverPreview] = useState(store?.coverImage || null);
+  
+  // ✅ States لجلب التجار
+  const [vendors, setVendors] = useState([]);
+  const [vendorsLoading, setVendorsLoading] = useState(false);
+  
   const isEdit = !!store;
+
+  // ✅ جلب قائمة التجار عند إنشاء متجر جديد
+  useEffect(() => {
+    if (!isEdit) {
+      const fetchVendors = async () => {
+        setVendorsLoading(true);
+        try {
+          const response = await vendorsService.getVendors({ limit: 100 });
+          const vendorsList = response.data?.vendors || response.data || [];
+          setVendors(vendorsList);
+          console.log('✅ Vendors loaded:', vendorsList.length);
+        } catch (error) {
+          console.error('❌ Failed to fetch vendors:', error);
+          setError('فشل تحميل قائمة التجار');
+        } finally {
+          setVendorsLoading(false);
+        }
+      };
+      fetchVendors();
+    }
+  }, [isEdit]);
+
+  // ✅ دالة معالجة رفع الشعار
+  const handleLogoChange = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      setLogoFile(file);
+      const previewUrl = URL.createObjectURL(file);
+      setLogoPreview(previewUrl);
+    }
+  };
+
+  // ✅ دالة معالجة رفع صورة الغلاف
+  const handleCoverChange = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      setCoverFile(file);
+      const previewUrl = URL.createObjectURL(file);
+      setCoverPreview(previewUrl);
+    }
+  };
+
+  // ✅ دالة إزالة الشعار
+  const handleRemoveLogo = () => {
+    setLogoFile(null);
+    setLogoPreview(store?.logo || null);
+  };
+
+  // ✅ دالة إزالة صورة الغلاف
+  const handleRemoveCover = () => {
+    setCoverFile(null);
+    setCoverPreview(store?.coverImage || null);
+  };
 
   // دالة لجلب الموقع الحالي للمستخدم
   const getCurrentLocation = () => {
@@ -151,6 +221,7 @@ export default function StoreForm({ store, onSuccess, onCancel }) {
       name: store?.name || '',
       description: store?.description || '',
       category: store?.category || '',
+      vendorId: store?.vendor?.id || store?.vendorId || store?.vendor?._id || '',  
       phone: store?.phone || '',
       email: store?.email || '',
       website: store?.website || '',
@@ -184,7 +255,6 @@ export default function StoreForm({ store, onSuccess, onCancel }) {
       },
     },
     validationSchema,
-    // في دالة onSubmit الخاصة بـ StoreForm
     onSubmit: async (values) => {
       setLoading(true);
       setError('');
@@ -192,45 +262,76 @@ export default function StoreForm({ store, onSuccess, onCancel }) {
       try {
         const formData = new FormData();
 
-        // إضافة الحقول الأساسية
-        Object.keys(values).forEach(key => {
-          if (key === 'address') {
-            const addressString = JSON.stringify(values.address);
-            console.log('📦 Address JSON:', addressString);
-            formData.append('address', addressString);
-          }
-          else if (key === 'deliveryInfo') {
-            const deliveryString = JSON.stringify(values.deliveryInfo);
-            console.log('📦 Delivery JSON:', deliveryString);
-            formData.append('deliveryInfo', deliveryString);
-          }
-          else if (key === 'openingHours') {
-            const hoursString = JSON.stringify(values.openingHours);
-            console.log('📦 Opening Hours JSON:', hoursString);
-            formData.append('openingHours', hoursString);
-          }
-          else if (key === 'tags') {
-            const tagsString = values.tags.join(',');
-            console.log('📦 Tags:', tagsString);
-            formData.append('tags', tagsString);
-          }
-          else if (key !== 'logo' && key !== 'coverImage') {
-            console.log(`📦 ${key}:`, values[key]);
-            formData.append(key, values[key]);
-          }
-        });
-
-        // تسجيل جميع البيانات التي تم إضافتها إلى FormData
-        console.log('📦 FormData entries:');
-        for (let pair of formData.entries()) {
-          console.log(pair[0], '=', pair[1]);
+        // ✅ إضافة الحقول الأساسية
+        formData.append('name', values.name);
+        formData.append('description', values.description);
+        formData.append('category', values.category);
+        formData.append('phone', values.phone);
+        
+        
+        if (values.vendorId) {
+          console.log('📦 Selected vendor ID:', values.vendorId);
+          formData.append('vendor', values.vendorId);  // استخدام vendor كما يتوقع الـ Backend
+        }
+        
+        if (values.email) {
+          formData.append('email', values.email);
+        }
+        
+        if (values.website) {
+          formData.append('website', values.website);
+        }
+        
+        formData.append('isOpen', values.isOpen);
+        
+        // ✅ تحويل الكائنات إلى JSON string
+        const addressString = JSON.stringify(values.address);
+        console.log('📦 Address JSON:', addressString);
+        formData.append('address', addressString);
+        
+        const deliveryString = JSON.stringify(values.deliveryInfo);
+        console.log('📦 Delivery JSON:', deliveryString);
+        formData.append('deliveryInfo', deliveryString);
+        
+        const hoursString = JSON.stringify(values.openingHours);
+        console.log('📦 Opening Hours JSON:', hoursString);
+        formData.append('openingHours', hoursString);
+        
+        // ✅ تحويل tags إلى string مفصول بفواصل
+        if (values.tags && values.tags.length > 0) {
+          const tagsString = values.tags.join(',');
+          console.log('📦 Tags:', tagsString);
+          formData.append('tags', tagsString);
+        }
+        
+        // ✅ إضافة الصور إذا وجدت
+        if (logoFile) {
+          console.log('📦 Adding logo file:', logoFile.name);
+          formData.append('logo', logoFile);
+        }
+        
+        if (coverFile) {
+          console.log('📦 Adding cover image file:', coverFile.name);
+          formData.append('coverImage', coverFile);
         }
 
+        // تسجيل جميع البيانات للـ debugging
+        console.log('📦 Final FormData entries:');
+        for (let pair of formData.entries()) {
+          if (pair[1] instanceof File) {
+            console.log(`   ${pair[0]} = [File: ${pair[1].name}]`);
+          } else {
+            console.log(`   ${pair[0]} = ${pair[1]}`);
+          }
+        }
+
+        // إرسال البيانات
         if (isEdit) {
           await storesService.updateStore(store._id, formData);
         } else {
           await storesService.createStore(formData);
         }
+        
         onSuccess();
       } catch (err) {
         console.error('❌ Store form error:', err);
@@ -242,18 +343,154 @@ export default function StoreForm({ store, onSuccess, onCancel }) {
     },
   });
 
+  // ✅ دالة عرض التاجر في الـ Select
+  const renderVendorValue = (selected) => {
+    const vendor = vendors.find(v => (v._id || v.id) === selected);
+    if (!vendor) return 'اختر التاجر';
+    return (
+      <Box display="flex" alignItems="center" gap={1}>
+        <Avatar src={vendor.avatar} sx={{ width: 28, height: 28 }}>
+          {vendor.name?.charAt(0)}
+        </Avatar>
+        <Typography variant="body2">{vendor.name}</Typography>
+        {vendor.isVerified && (
+          <Chip label="موثق" size="small" color="success" sx={{ height: 20, fontSize: '0.7rem' }} />
+        )}
+      </Box>
+    );
+  };
+
   return (
     <form onSubmit={formik.handleSubmit}>
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
           {error}
         </Alert>
       )}
 
       <Grid container spacing={2}>
-        {/* المعلومات الأساسية */}
+        {/* ✅ قسم الصور */}
         <Grid item xs={12}>
           <Typography variant="h6" sx={{ mb: 2 }}>
+            صور المتجر
+          </Typography>
+        </Grid>
+
+        {/* شعار المتجر */}
+        <Grid item xs={12} sm={6}>
+          <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
+            <Typography variant="subtitle2" gutterBottom>
+              شعار المتجر
+            </Typography>
+            <Box sx={{ position: 'relative', display: 'inline-block' }}>
+              <Badge
+                overlap="circular"
+                anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+                badgeContent={
+                  logoPreview && !logoFile && !store?.logo ? null : (
+                    <IconButton
+                      size="small"
+                      onClick={handleRemoveLogo}
+                      sx={{
+                        bgcolor: 'error.main',
+                        color: 'white',
+                        '&:hover': { bgcolor: 'error.dark' },
+                      }}
+                    >
+                      <ClearIcon fontSize="small" />
+                    </IconButton>
+                  )
+                }
+              >
+                <Avatar
+                  src={logoPreview}
+                  sx={{ width: 100, height: 100, mx: 'auto', mb: 1 }}
+                  variant="rounded"
+                >
+                  {!logoPreview && <PhotoCameraIcon sx={{ fontSize: 40 }} />}
+                </Avatar>
+              </Badge>
+            </Box>
+            <Button
+              variant="outlined"
+              component="label"
+              startIcon={<CloudUploadIcon />}
+              size="small"
+              sx={{ mt: 1 }}
+            >
+              رفع شعار
+              <input
+                type="file"
+                hidden
+                accept="image/*"
+                onChange={handleLogoChange}
+              />
+            </Button>
+            <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+              PNG, JPG, JPEG (Max 2MB)
+            </Typography>
+          </Paper>
+        </Grid>
+
+        {/* صورة الغلاف */}
+        <Grid item xs={12} sm={6}>
+          <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
+            <Typography variant="subtitle2" gutterBottom>
+              صورة الغلاف
+            </Typography>
+            <Box sx={{ position: 'relative', display: 'inline-block' }}>
+              <Badge
+                overlap="circular"
+                anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+                badgeContent={
+                  coverPreview && !coverFile && !store?.coverImage ? null : (
+                    <IconButton
+                      size="small"
+                      onClick={handleRemoveCover}
+                      sx={{
+                        bgcolor: 'error.main',
+                        color: 'white',
+                        '&:hover': { bgcolor: 'error.dark' },
+                      }}
+                    >
+                      <ClearIcon fontSize="small" />
+                    </IconButton>
+                  )
+                }
+              >
+                <Avatar
+                  src={coverPreview}
+                  sx={{ width: 100, height: 100, mx: 'auto', mb: 1 }}
+                  variant="rounded"
+                >
+                  {!coverPreview && <PhotoCameraIcon sx={{ fontSize: 40 }} />}
+                </Avatar>
+              </Badge>
+            </Box>
+            <Button
+              variant="outlined"
+              component="label"
+              startIcon={<CloudUploadIcon />}
+              size="small"
+              sx={{ mt: 1 }}
+            >
+              رفع غلاف
+              <input
+                type="file"
+                hidden
+                accept="image/*"
+                onChange={handleCoverChange}
+              />
+            </Button>
+            <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+              PNG, JPG, JPEG (Max 5MB)
+            </Typography>
+          </Paper>
+        </Grid>
+
+        {/* المعلومات الأساسية */}
+        <Grid item xs={12}>
+          <Typography variant="h6" sx={{ mb: 2, mt: 1 }}>
             المعلومات الأساسية
           </Typography>
         </Grid>
@@ -353,6 +590,64 @@ export default function StoreForm({ store, onSuccess, onCancel }) {
             disabled={loading}
           />
         </Grid>
+
+        {!isEdit && (
+          <Grid item xs={12} sm={6}>
+            <TextField
+              fullWidth
+              select
+              name="vendorId"
+              label="التاجر (مالك المتجر)"
+              value={formik.values.vendorId}
+              onChange={formik.handleChange}
+              error={formik.touched.vendorId && Boolean(formik.errors.vendorId)}
+              helperText={formik.touched.vendorId && formik.errors.vendorId}
+              disabled={loading || vendorsLoading}
+              required
+              SelectProps={{
+                renderValue: renderVendorValue,
+              }}
+            >
+              <MenuItem value="">
+                <em>اختر التاجر</em>
+              </MenuItem>
+              {vendorsLoading ? (
+                <MenuItem disabled>
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <CircularProgress size={20} />
+                    جاري تحميل التجار...
+                  </Box>
+                </MenuItem>
+              ) : (
+                vendors.map((vendor) => (
+                  <MenuItem key={vendor._id || vendor.id} value={vendor._id || vendor.id}>
+                    <Box display="flex" alignItems="center" gap={2} justifyContent="space-between" width="100%">
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Avatar src={vendor.avatar} sx={{ width: 32, height: 32 }}>
+                          {vendor.name?.charAt(0)}
+                        </Avatar>
+                        <Box>
+                          <Typography variant="body2" fontWeight="medium">
+                            {vendor.name}
+                          </Typography>
+                          <Typography variant="caption" color="textSecondary">
+                            {vendor.phone} {vendor.email ? `• ${vendor.email}` : ''}
+                          </Typography>
+                        </Box>
+                      </Box>
+                      {vendor.isVerified && (
+                        <Chip label="موثق" size="small" color="success" sx={{ height: 20 }} />
+                      )}
+                    </Box>
+                  </MenuItem>
+                ))
+              )}
+            </TextField>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+              اختر التاجر الذي سيمتلك هذا المتجر
+            </Typography>
+          </Grid>
+        )}
 
         <Grid item xs={12}>
           <FormControlLabel

@@ -1,4 +1,6 @@
-import { useState } from 'react';
+// src/pages/Orders/index.jsx - نسخة كاملة مع _id
+
+import { useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import {
   Box,
@@ -13,16 +15,13 @@ import {
   Grid,
   Alert,
   Snackbar,
-  Rating,
 } from '@mui/material';
 import {
   Visibility,
   LocalShipping,
   Cancel,
   Refresh,
-  Download,
   CheckCircle,
-  Block,
 } from '@mui/icons-material';
 import { ordersService } from '../../api';
 import ResponsiveTable from '../../components/Common/ResponsiveTable';
@@ -33,6 +32,7 @@ import { useResponsive } from '../../hooks/useResponsive';
 import OrderDetails from './components/OrderDetails';
 import AssignDriverModal from './components/AssignDriverModal';
 import { formatDate, formatCurrency } from '../../utils/formatters';
+import { getReactKey, handleError } from '../../utils/helpers';
 
 const statusColors = {
   pending: { label: 'قيد الانتظار', color: '#ff9800', bg: '#ff980020' },
@@ -54,7 +54,7 @@ const statusOptions = [
 ];
 
 export default function Orders() {
-  const { isMobile, fontSize, spacing, gridColumns } = useResponsive();
+  const { isMobile, fontSize, spacing } = useResponsive();
   const queryClient = useQueryClient();
   
   const [page, setPage] = useState(0);
@@ -72,7 +72,6 @@ export default function Orders() {
   const [cancelReason, setCancelReason] = useState('');
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
-  // جلب الطلبات
   const { data, isLoading, refetch, isFetching } = useQuery(
     ['orders', page, pageSize, filters],
     () => ordersService.getOrders({
@@ -82,16 +81,25 @@ export default function Orders() {
       search: filters.search || undefined,
       fromDate: filters.fromDate || undefined,
       toDate: filters.toDate || undefined,
-    })
+    }),
+    {
+      keepPreviousData: true,
+      onError: (error) => {
+        setSnackbar({ 
+          open: true, 
+          message: handleError(error, 'فشل تحميل بيانات الطلبات'), 
+          severity: 'error' 
+        });
+      }
+    }
   );
 
   const orders = data?.data || [];
   const totalCount = data?.pagination?.total || 0;
   const stats = data?.stats || {};
 
-  // إلغاء طلب
   const cancelMutation = useMutation(
-    ({ id, reason }) => ordersService.forceCancelOrder(id, { reason }),
+    ({ orderId, reason }) => ordersService.forceCancelOrder(orderId, { reason }),
     {
       onSuccess: () => {
         queryClient.invalidateQueries('orders');
@@ -100,20 +108,61 @@ export default function Orders() {
         setSnackbar({ open: true, message: 'تم إلغاء الطلب بنجاح', severity: 'success' });
       },
       onError: (error) => {
-        setSnackbar({ open: true, message: error.response?.data?.message || 'فشل إلغاء الطلب', severity: 'error' });
+        setSnackbar({ 
+          open: true, 
+          message: handleError(error, 'فشل إلغاء الطلب'), 
+          severity: 'error' 
+        });
       },
     }
   );
 
-  const statsCards = [
-    { title: 'إجمالي الطلبات', value: stats.totalOrders?.toLocaleString() || 0, icon: Refresh, color: '#2196f3' },
+  const handleViewDetails = useCallback((order) => {
+    setSelectedOrder(order);
+    setOpenDetails(true);
+  }, []);
+
+  const handleAssignDriver = useCallback((order) => {
+    setSelectedOrder(order);
+    setOpenAssignDriver(true);
+  }, []);
+
+  const handleCancelOrder = useCallback((order) => {
+    setSelectedOrder(order);
+    setOpenCancelDialog(true);
+  }, []);
+
+  const confirmCancel = useCallback(() => {
+    if (selectedOrder && cancelReason.trim()) {
+      cancelMutation.mutate({ orderId: selectedOrder._id, reason: cancelReason });
+    }
+  }, [selectedOrder, cancelReason, cancelMutation]);
+
+  const resetFilters = useCallback(() => {
+    setFilters({
+      search: '',
+      status: 'all',
+      fromDate: '',
+      toDate: '',
+    });
+    setPage(0);
+  }, []);
+
+  const statsCards = useMemo(() => [
+    { title: 'إجمالي الطلبات', value: stats.totalOrders?.toLocaleString() || 0, icon: CheckCircle, color: '#2196f3' },
     { title: 'طلبات مكتملة', value: stats.completedOrders?.toLocaleString() || 0, icon: CheckCircle, color: '#4caf50' },
     { title: 'طلبات ملغية', value: stats.cancelledOrders?.toLocaleString() || 0, icon: Cancel, color: '#f44336' },
-    { title: 'إجمالي الإيرادات', value: formatCurrency(stats.totalRevenue || 0), icon: Download, color: '#ff9800' },
-  ];
+    { title: 'إجمالي الإيرادات', value: formatCurrency(stats.totalRevenue || 0), icon: Refresh, color: '#ff9800' },
+  ], [stats]);
 
-  const columns = [
-    { field: '_id', headerName: 'رقم الطلب', width: 220, hideOnMobile: true },
+  const columns = useMemo(() => [
+    { 
+      field: '_id', 
+      headerName: 'رقم الطلب', 
+      width: 220, 
+      hideOnMobile: true,
+      renderCell: (params) => `#${params.row._id?.slice(-6)}`
+    },
     { 
       field: 'user', 
       headerName: 'العميل', 
@@ -171,49 +220,35 @@ export default function Orders() {
       headerName: 'الإجراءات',
       width: 150,
       hideOnDesktop: false,
-      renderCell: (params) => (
-        <Box display="flex" gap={0.5}>
-          <Tooltip title="عرض التفاصيل">
-            <IconButton size="small" onClick={() => {
-              setSelectedOrder(params.row);
-              setOpenDetails(true);
-            }}>
-              <Visibility fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          {params.row.status !== 'delivered' && params.row.status !== 'cancelled' && (
-            <>
-              <Tooltip title="تعيين مندوب">
-                <IconButton size="small" onClick={() => {
-                  setSelectedOrder(params.row);
-                  setOpenAssignDriver(true);
-                }}>
-                  <LocalShipping fontSize="small" />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="إلغاء الطلب">
-                <IconButton size="small" onClick={() => {
-                  setSelectedOrder(params.row);
-                  setOpenCancelDialog(true);
-                }} color="error">
-                  <Cancel fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            </>
-          )}
-        </Box>
-      ),
+      renderCell: (params) => {
+        const order = params.row;
+        const canModify = order.status !== 'delivered' && order.status !== 'cancelled';
+        return (
+          <Box display="flex" gap={0.5}>
+            <Tooltip title="عرض التفاصيل">
+              <IconButton size="small" onClick={() => handleViewDetails(order)}>
+                <Visibility fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            {canModify && (
+              <>
+                <Tooltip title="تعيين مندوب">
+                  <IconButton size="small" onClick={() => handleAssignDriver(order)}>
+                    <LocalShipping fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="إلغاء الطلب">
+                  <IconButton size="small" onClick={() => handleCancelOrder(order)} color="error">
+                    <Cancel fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </>
+            )}
+          </Box>
+        );
+      },
     },
-  ];
-
-  const resetFilters = () => {
-    setFilters({
-      search: '',
-      status: 'all',
-      fromDate: '',
-      toDate: '',
-    });
-  };
+  ], [handleViewDetails, handleAssignDriver, handleCancelOrder]);
 
   return (
     <Box sx={{ p: spacing.page }}>
@@ -234,14 +269,15 @@ export default function Orders() {
           <Typography variant="h6" fontWeight="bold" sx={{ fontSize: fontSize.h3 }}>
             قائمة الطلبات
           </Typography>
-          <Box display="flex" gap={1} flexWrap="wrap">
-            <Button variant="outlined" startIcon={<Refresh />} onClick={() => refetch()} size="small" disabled={isFetching}>
-              تحديث
-            </Button>
-            <Button variant="outlined" startIcon={<Download />} size="small">
-              تصدير
-            </Button>
-          </Box>
+          <Button 
+            variant="outlined" 
+            startIcon={<Refresh />} 
+            onClick={() => refetch()} 
+            size="small" 
+            disabled={isFetching}
+          >
+            تحديث
+          </Button>
         </Box>
 
         <ResponsiveFilters onReset={resetFilters}>
@@ -304,13 +340,18 @@ export default function Orders() {
             setOpenDetails(true);
           }}
           emptyMessage="لا توجد طلبات"
-          renderMobileCard={(order) => {
+          renderMobileCard={(order, index) => {
             const status = statusColors[order.status] || { label: order.status, color: '#999', bg: '#99920' };
+            const canModify = order.status !== 'delivered' && order.status !== 'cancelled';
             return (
-              <Paper key={order._id} sx={{ p: 1.5, cursor: 'pointer', mb: 1.5 }} onClick={() => {
-                setSelectedOrder(order);
-                setOpenDetails(true);
-              }}>
+              <Paper 
+                key={getReactKey(order, index)} 
+                sx={{ p: 1.5, cursor: 'pointer', mb: 1.5 }} 
+                onClick={() => {
+                  setSelectedOrder(order);
+                  setOpenDetails(true);
+                }}
+              >
                 <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
                   <Typography variant="subtitle2" fontWeight="bold">
                     #{order._id?.slice(-6)}
@@ -335,66 +376,45 @@ export default function Orders() {
                     {formatDate(order.createdAt, 'HH:mm')}
                   </Typography>
                 </Box>
-                <Box display="flex" justifyContent="flex-end" gap={1} mt={1}>
-                  {order.status !== 'delivered' && order.status !== 'cancelled' && (
-                    <>
-                      <IconButton 
-                        size="small" 
-                        onClick={(e) => { 
-                          e.stopPropagation(); 
-                          setSelectedOrder(order);
-                          setOpenAssignDriver(true);
-                        }}
-                      >
-                        <LocalShipping fontSize="small" />
-                      </IconButton>
-                      <IconButton 
-                        size="small" 
-                        color="error"
-                        onClick={(e) => { 
-                          e.stopPropagation(); 
-                          setSelectedOrder(order);
-                          setOpenCancelDialog(true);
-                        }}
-                      >
-                        <Cancel fontSize="small" />
-                      </IconButton>
-                    </>
-                  )}
-                </Box>
+                {canModify && (
+                  <Box display="flex" justifyContent="flex-end" gap={1} mt={1}>
+                    <IconButton 
+                      size="small" 
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        handleAssignDriver(order);
+                      }}
+                    >
+                      <LocalShipping fontSize="small" />
+                    </IconButton>
+                    <IconButton 
+                      size="small" 
+                      color="error"
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        handleCancelOrder(order);
+                      }}
+                    >
+                      <Cancel fontSize="small" />
+                    </IconButton>
+                  </Box>
+                )}
               </Paper>
             );
           }}
         />
-
-        {/* ترقيم الصفحات للهواتف */}
-        {isMobile && totalCount > pageSize && (
-          <Box display="flex" justifyContent="center" mt={2} gap={1}>
-            <Button variant="outlined" onClick={() => setPage(page - 1)} disabled={page === 0} size="small">
-              السابق
-            </Button>
-            <Typography variant="body2" sx={{ alignSelf: 'center' }}>
-              {page + 1} / {Math.ceil(totalCount / pageSize)}
-            </Typography>
-            <Button variant="outlined" onClick={() => setPage(page + 1)} disabled={(page + 1) * pageSize >= totalCount} size="small">
-              التالي
-            </Button>
-          </Box>
-        )}
       </Paper>
 
-      {/* تفاصيل الطلب */}
       <ResponsiveDialog
         open={openDetails}
         onClose={() => setOpenDetails(false)}
-        title={`تفاصيل الطلب #${selectedOrder?._id?.slice(-6)}`}
+        title={`تفاصيل الطلب #${selectedOrder?._id?.slice(-6) || ''}`}
         maxWidth="md"
         actions={<Button onClick={() => setOpenDetails(false)}>إغلاق</Button>}
       >
         {selectedOrder && <OrderDetails order={selectedOrder} />}
       </ResponsiveDialog>
 
-      {/* تعيين مندوب */}
       <AssignDriverModal
         open={openAssignDriver}
         onClose={() => setOpenAssignDriver(false)}
@@ -406,7 +426,6 @@ export default function Orders() {
         }}
       />
 
-      {/* إلغاء الطلب */}
       <ResponsiveDialog
         open={openCancelDialog}
         onClose={() => setOpenCancelDialog(false)}
@@ -416,7 +435,7 @@ export default function Orders() {
           <>
             <Button onClick={() => setOpenCancelDialog(false)}>إلغاء</Button>
             <Button
-              onClick={() => cancelMutation.mutate({ id: selectedOrder?._id, reason: cancelReason })}
+              onClick={confirmCancel}
               color="error"
               variant="contained"
               disabled={!cancelReason.trim() || cancelMutation.isLoading}
@@ -438,7 +457,12 @@ export default function Orders() {
         />
       </ResponsiveDialog>
 
-      <Snackbar open={snackbar.open} autoHideDuration={6000} onClose={() => setSnackbar({ ...snackbar, open: false })}>
+      <Snackbar 
+        open={snackbar.open} 
+        autoHideDuration={6000} 
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
         <Alert severity={snackbar.severity}>{snackbar.message}</Alert>
       </Snackbar>
     </Box>
