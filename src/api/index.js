@@ -1,4 +1,4 @@
-// src/api/index.js - جميع الخدمات مع توحيد الـ IDs
+// src/api/index.js - إضافة خدمات جديدة للـ Dashboard
 
 import apiClient from './client';
 import { adminEndpoints, mapEndpoints, buildUrl, getItemId } from './endpoints';
@@ -58,6 +58,8 @@ export const dashboardService = {
   getStatsUsers: () => apiClient.get(adminEndpoints.statsUsers),
   getStatsOrders: () => apiClient.get(adminEndpoints.statsOrders),
   getStatsRevenue: () => apiClient.get(adminEndpoints.statsRevenue),
+  
+  getFullDashboard: () => apiClient.get('/admin/dashboard/full'),
 };
 
 // ==================== خدمات المستخدمين ====================
@@ -76,6 +78,8 @@ export const usersService = {
     const id = getItemId(user);
     return apiClient.delete(adminEndpoints.userDetails(id));
   },
+  // ✅ إضافة: إحصائيات المستخدمين للتوزيع حسب الدور
+  getUserStatsByRole: () => apiClient.get(adminEndpoints.statsUsers),
 };
 
 // ==================== خدمات التجار ====================
@@ -231,6 +235,7 @@ export const driversService = {
     const id = getItemId(driver);
     return apiClient.put(adminEndpoints.updateDriverStatus(id), data);
   },
+   getDriversWithLocation: () => apiClient.get(adminEndpoints.driversWithLocation),
 };
 
 // ==================== خدمات الإشعارات ====================

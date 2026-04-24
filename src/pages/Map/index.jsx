@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+// src/pages/Map/index.jsx - النسخة المعدلة بالكامل
+
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useQuery, useQueryClient } from 'react-query';
 import { useResponsive } from '../../hooks/useResponsive';
 import {
     Box,
     Paper,
     Typography,
-    Grid,
     TextField,
     Button,
     Chip,
@@ -28,6 +29,9 @@ import {
     Tabs,
     Tab,
     Collapse,
+    Divider,
+    MenuItem,
+    Grid,
 } from '@mui/material';
 import {
     Refresh,
@@ -43,12 +47,11 @@ import {
     FilterList,
     ClearAll,
 } from '@mui/icons-material';
-import { mapService, ordersService, storesService } from '../../api';
+import { mapService, ordersService, storesService, driversService } from '../../api';
 import DriverLocationMap from '../../components/Map/DriverLocationMap';
 import OrderTrackingMap from '../../components/Map/OrderTrackingMap';
 import StoreMap from '../../components/Map/StoreMap';
 
-// ✅ تبويبات الصفحة
 const TABS = {
     DRIVERS: 'drivers',
     ORDERS: 'orders',
@@ -56,24 +59,43 @@ const TABS = {
     SEARCH: 'search',
 };
 
-// ✅ مكون Tooltip آمن يتعامل مع العناصر المعطلة
 const SafeTooltip = ({ title, children, disabled, ...props }) => {
-    // إذا كان الـ Tooltip معطل أو الزر معطل، نلف الزر بـ span
-    if (disabled || (children && children.props && children.props.disabled)) {
+    if (disabled) {
         return (
             <Tooltip title={title} {...props}>
-                <span style={{ display: 'inline-flex', cursor: 'not-allowed' }}>
-                    {children}
-                </span>
+                <span style={{ display: 'inline-flex' }}>{children}</span>
             </Tooltip>
         );
     }
-    
-    return (
-        <Tooltip title={title} {...props}>
-            {children}
-        </Tooltip>
-    );
+    return <Tooltip title={title} {...props}>{children}</Tooltip>;
+};
+
+// ✅ دالة الحصول على حالة المندوب (محسنة)
+const getDriverStatus = (driver) => {
+
+
+
+    console.log('🔍 Driver data:', {
+        name: driver.name,
+        isActive: driver.isActive,
+        isOnline: driver.isOnline,
+        isAvailable: driver.driverInfo?.isAvailable,
+        hasActiveOrder: driver.currentOrder !== null,
+        driverInfo: driver.driverInfo
+    });
+
+
+    const isActive = driver.isActive === true;
+    const isOnline = driver.isOnline === true;
+    const isAvailable = driver.driverInfo?.isAvailable === true;
+    const hasActiveOrder = driver.currentOrder !== null && driver.currentOrder !== undefined;
+
+    if (!isActive) return { color: '#F44336', label: 'حساب معطل', icon: '🔴' };
+    if (!isOnline) return { color: '#FF9800', label: 'غير متصل', icon: '🟠' };
+    if (hasActiveOrder) return { color: '#FF9800', label: 'مشغول بتوصيلة', icon: '🚚' };
+    if (isOnline && !isAvailable) return { color: '#FFC107', label: 'متصل - غير متاح', icon: '🟡' };
+    if (isOnline && isAvailable) return { color: '#4CAF50', label: 'متصل ومتاح', icon: '🟢' };
+    return { color: '#9E9E9E', label: 'غير معروف', icon: '⚫' };
 };
 
 export default function MapPage() {
@@ -91,111 +113,143 @@ export default function MapPage() {
     const [error, setError] = useState(null);
     const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
     const [updatingStores, setUpdatingStores] = useState(false);
-    const [autoRefreshInterval] = useState(10000);
+    const [autoRefreshInterval] = useState(30000);
     const [showDriverFilters, setShowDriverFilters] = useState(false);
+
     const [driverFilters, setDriverFilters] = useState({
         showOnlineOnly: false,
-        showOfflineOnly: false,
+        showAvailableOnly: false,
         minRating: 0,
     });
+
     const [mapZoom, setMapZoom] = useState(12);
     const [mapCenter, setMapCenter] = useState(null);
-    const [isMapReady, setIsMapReady] = useState(false);
-    const [lastUpdateTime, setLastUpdateTime] = useState(null);
 
-    // تحديد ارتفاع الخريطة حسب حجم الشاشة
     const mapHeight = isMobile ? 400 : isTablet ? 500 : 560;
     const sidePanelHeight = isMobile ? 400 : 650;
 
-    // جلب مواقع المندوبين
-    const { 
-        data: driversLocations, 
-        isLoading: driversLoading, 
+    // ✅ جلب المندوبين
+
+
+
+    const {
+        data: driversRawData,
+        isLoading: driversLoading,
         refetch: refetchDrivers,
-        isFetching: isDriversFetching,
+        isFetching: isDriversFetching
     } = useQuery(
         'drivers-locations',
-        () => mapService.getAllDriversLocations({ limit: 100 }),
-        { 
-            enabled: activeTab === TABS.DRIVERS, 
-            refetchInterval: autoRefreshInterval > 0 ? autoRefreshInterval : false,
-            onSuccess: () => setLastUpdateTime(new Date()),
+        () => {
+            console.log('🔄 Fetching drivers data from API...');
+            return driversService.getDrivers({ limit: 100 });
+        },
+        {
+            enabled: activeTab === TABS.DRIVERS,
+            refetchInterval: autoRefreshInterval,
+            onSuccess: (data) => {
+                console.log('✅ Drivers API Response:', data);
+                console.log('📊 Response structure:', Object.keys(data));
+                console.log('📊 Data.data:', data?.data);
+                console.log('📊 Data.data[0]:', data?.data?.[0]);
+            },
+            onError: (error) => {
+                console.error('❌ Drivers API Error:', error);
+            }
         }
     );
-    
+
+
+
+
+    const driversList = useMemo(() => {
+        if (!driversRawData) return [];
+        const data = driversRawData?.data || driversRawData;
+        const list = Array.isArray(data) ? data : [];
+
+        // ✅ طباعة تفصيلية للبيانات
+        console.log('🚚 Drivers List Raw:', list);
+        console.log('📊 Total drivers count:', list.length);
+
+        list.forEach((driver, idx) => {
+            console.log(`Driver ${idx + 1}:`, {
+                id: driver._id,
+                name: driver.name,
+                isActive: driver.isActive,
+                isOnline: driver.isOnline,
+                isAvailable: driver.driverInfo?.isAvailable,
+                rating: driver.rating,
+                location: driver.driverInfo?.currentLocation?.coordinates
+            });
+        });
+
+        return list;
+    }, [driversRawData]);
+
+
+
+
+    // ✅ تطبيق الفلاتر
+    const filteredDriversList = useMemo(() => {
+        let drivers = [...driversList];
+        if (driverFilters.showOnlineOnly) {
+            drivers = drivers.filter(d => d.isOnline === true);
+        }
+        if (driverFilters.showAvailableOnly) {
+            drivers = drivers.filter(d => d.driverInfo?.isAvailable === true);
+        }
+        if (driverFilters.minRating > 0) {
+            drivers = drivers.filter(d => (d.rating || d.driverInfo?.rating || 0) >= driverFilters.minRating);
+        }
+        return drivers;
+    }, [driversList, driverFilters]);
+
+    // ✅ إحصائيات سريعة
+    const driversStats = useMemo(() => {
+        const total = driversList.length;
+        const online = driversList.filter(d => d.isOnline === true).length;
+        const available = driversList.filter(d => d.driverInfo?.isAvailable === true && d.isOnline === true).length;
+        return { total, online, available };
+    }, [driversList]);
+
     // جلب الطلبات النشطة
     const { data: activeOrders, isLoading: ordersLoading, refetch: refetchOrders } = useQuery(
         'active-orders',
-        () => ordersService.getOrders({
-            page: 1,
-            limit: 50,
-            status: 'accepted,ready,picked,preparing,out_for_delivery'
-        }),
-        { 
+        () => ordersService.getOrders({ page: 1, limit: 50, status: 'accepted,ready,picked' }),
+        {
             enabled: activeTab === TABS.ORDERS,
-            refetchInterval: autoRefreshInterval > 0 ? autoRefreshInterval : false,
+            refetchInterval: autoRefreshInterval,
         }
     );
 
     // جلب المتاجر
-    const { 
-        data: allStores, 
-        refetch: refetchStores,
-        isLoading: storesLoading,
-        isFetching: isStoresFetching,
-    } = useQuery(
+    const { data: allStores, refetch: refetchStores, isLoading: storesLoading } = useQuery(
         'all-stores',
         () => storesService.getStores({ limit: 100 }),
-        { 
-            enabled: activeTab === TABS.STORES,
-            refetchInterval: autoRefreshInterval > 0 ? autoRefreshInterval : false,
-        }
+        { enabled: activeTab === TABS.STORES }
     );
 
-    // فلترة المندوبين
-    const filteredDrivers = useCallback(() => {
-        if (!driversLocations?.data?.drivers) return [];
-        
-        let drivers = [...driversLocations.data.drivers];
-        
-        if (driverFilters.showOnlineOnly) {
-            drivers = drivers.filter(d => d.isOnline === true);
+    // استخراج إحداثيات المندوب
+    const getDriverCoords = useCallback((driver) => {
+        const coords = driver?.driverInfo?.currentLocation?.coordinates;
+        if (coords && Array.isArray(coords) && coords.length >= 2) {
+            return { lat: parseFloat(coords[1]), lng: parseFloat(coords[0]) };
         }
-        if (driverFilters.showOfflineOnly) {
-            drivers = drivers.filter(d => d.isOnline === false);
-        }
-        if (driverFilters.minRating > 0) {
-            drivers = drivers.filter(d => (d.rating || 0) >= driverFilters.minRating);
-        }
-        
-        return drivers;
-    }, [driversLocations, driverFilters]);
+        return null;
+    }, []);
 
-    // تحديث إحداثيات المتاجر
+    // تحديث المتاجر
     const handleUpdateStoresCoordinates = async () => {
         try {
             setUpdatingStores(true);
-            setSnackbar({ open: true, message: 'جاري تحديث مواقع المتاجر...', severity: 'info' });
-            
             await storesService.updateStoreCoordinates();
             await refetchStores();
-            
             if (userLocation) {
-                await fetchNearbyStores(userLocation.lat, userLocation.lng);
+                const response = await mapService.getStoresMap({ lat: userLocation.lat, lng: userLocation.lng, radius: 5000 });
+                setNearbyStores(response.data?.stores || []);
             }
-            
-            setSnackbar({
-                open: true,
-                message: 'تم تحديث مواقع المتاجر بنجاح',
-                severity: 'success'
-            });
+            setSnackbar({ open: true, message: 'تم تحديث مواقع المتاجر', severity: 'success' });
         } catch (error) {
-            console.error('❌ Failed to update store coordinates:', error);
-            setSnackbar({
-                open: true,
-                message: error.response?.data?.message || 'فشل تحديث مواقع المتاجر',
-                severity: 'error'
-            });
+            setSnackbar({ open: true, message: 'فشل تحديث مواقع المتاجر', severity: 'error' });
         } finally {
             setUpdatingStores(false);
         }
@@ -203,251 +257,81 @@ export default function MapPage() {
 
     // تحديث جميع البيانات
     const refreshAllData = async () => {
-        try {
-            setSnackbar({ open: true, message: 'جاري تحديث البيانات...', severity: 'info' });
-            
-            const refreshPromises = [];
-            
-            if (activeTab === TABS.DRIVERS) {
-                refreshPromises.push(refetchDrivers());
-            } else if (activeTab === TABS.ORDERS) {
-                refreshPromises.push(refetchOrders());
-            } else if (activeTab === TABS.STORES) {
-                refreshPromises.push(refetchStores());
-                if (userLocation) {
-                    refreshPromises.push(fetchNearbyStores(userLocation.lat, userLocation.lng));
-                }
-            }
-            
-            await Promise.all(refreshPromises);
-            setLastUpdateTime(new Date());
-            
-            setSnackbar({
-                open: true,
-                message: 'تم تحديث البيانات بنجاح',
-                severity: 'success'
-            });
-        } catch (error) {
-            console.error('Refresh failed:', error);
-            setSnackbar({
-                open: true,
-                message: 'فشل تحديث البيانات',
-                severity: 'error'
-            });
-        }
+        if (activeTab === TABS.DRIVERS) await refetchDrivers();
+        if (activeTab === TABS.ORDERS) await refetchOrders();
+        if (activeTab === TABS.STORES) await refetchStores();
+        setSnackbar({ open: true, message: 'تم تحديث البيانات', severity: 'success' });
     };
 
     // الحصول على موقع المستخدم
     const getUserLocation = useCallback(() => {
         setLoadingLocation(true);
-        setError(null);
-
-        if (!navigator.geolocation) {
-            setError('المتصفح لا يدعم خدمات الموقع');
-            setLoadingLocation(false);
-            return;
-        }
-
         navigator.geolocation.getCurrentPosition(
             (position) => {
-                const location = {
-                    lat: position.coords.latitude,
-                    lng: position.coords.longitude,
-                };
+                const location = { lat: position.coords.latitude, lng: position.coords.longitude };
                 setUserLocation(location);
                 setMapCenter(location);
                 setLoadingLocation(false);
-                
                 if (activeTab === TABS.STORES) {
-                    fetchNearbyStores(location.lat, location.lng);
+                    mapService.getStoresMap({ lat: location.lat, lng: location.lng, radius: 5000 })
+                        .then(res => setNearbyStores(res.data?.stores || []));
                 }
-                
-                setSnackbar({
-                    open: true,
-                    message: 'تم تحديد موقعك بنجاح',
-                    severity: 'success'
-                });
             },
-            (err) => {
-                console.error('Geolocation error:', err);
-                setError('فشل الحصول على الموقع. يرجى تفعيل خدمات الموقع.');
-                setLoadingLocation(false);
-            },
+            () => { setError('فشل الحصول على الموقع'); setLoadingLocation(false); },
             { enableHighAccuracy: true, timeout: 10000 }
         );
     }, [activeTab]);
 
-    // جلب المتاجر القريبة
-    const fetchNearbyStores = async (lat, lng) => {
-        try {
-            const response = await mapService.getStoresMap({ lat, lng, radius: 5000 });
-            setNearbyStores(response.data?.stores || []);
-        } catch (err) {
-            console.error('Failed to fetch nearby stores:', err);
-        }
-    };
-
-    // البحث عن موقع
+    // البحث
     const handleSearch = async () => {
         if (!searchQuery.trim()) return;
-
         try {
             const response = await mapService.geocode(searchQuery, 10);
             setSearchResults(response.data || []);
-            
             if (response.data?.length > 0) {
-                const firstResult = response.data[0];
-                setMapCenter({
-                    lat: parseFloat(firstResult.lat),
-                    lng: parseFloat(firstResult.lon),
-                });
+                setMapCenter({ lat: parseFloat(response.data[0].lat), lng: parseFloat(response.data[0].lon) });
             }
         } catch (err) {
-            console.error('Search failed:', err);
-            setError('فشل البحث عن الموقع');
+            setError('فشل البحث');
         }
     };
-    
-    // ✅ FIXED: استخدام order._id بدلاً من order.id
-    const handleTrackOrder = async (order) => {
-        setSelectedOrder(order);
-        try {
-            const response = await mapService.getOrderRoute(order._id);
-            console.log('Order route:', response.data);
-        } catch (err) {
-            console.error('Failed to get order route:', err);
-        }
-    };
-    
-    // ✅ FIXED: استخدام driver._id بدلاً من driver.id
-    const handleViewDriverLocation = (driver) => {
+
+    const handleViewDriverLocation = useCallback((driver) => {
         setSelectedDriver(driver);
-        if (driver.location?.coordinates && driver.location.coordinates.length >= 2) {
-            setMapCenter({
-                lat: driver.location.coordinates[1],
-                lng: driver.location.coordinates[0],
-            });
+        const coords = getDriverCoords(driver);
+        if (coords) {
+            setMapCenter(coords);
+            if (mapRef.current?.flyTo) mapRef.current.flyTo(coords.lng, coords.lat);
         }
-    };
-    
-    // اختيار متجر
-    const handleStoreSelect = (store) => {
-        console.log('Selected store:', store);
-    };
+    }, [getDriverCoords]);
 
-    // التحكم في تكبير الخريطة
-    const handleZoomIn = () => {
-        if (mapRef.current?.zoomIn) {
-            mapRef.current.zoomIn();
-        }
-    };
-    
-    const handleZoomOut = () => {
-        if (mapRef.current?.zoomOut) {
-            mapRef.current.zoomOut();
-        }
-    };
-
-    // إعادة تعيين الفلاتر
     const resetFilters = () => {
-        setDriverFilters({
-            showOnlineOnly: false,
-            showOfflineOnly: false,
-            minRating: 0,
-        });
+        setDriverFilters({ showOnlineOnly: false, showAvailableOnly: false, minRating: 0 });
         setShowDriverFilters(false);
-        setSnackbar({
-            open: true,
-            message: 'تم إعادة تعيين الفلاتر',
-            severity: 'info'
-        });
     };
 
-    // حساب عدد المتاجر بدون إحداثيات
-    const storesList = nearbyStores.length > 0 ? nearbyStores : (allStores?.data || []);
-    const storesWithoutCoords = storesList.filter(store => {
-        return !store.address?.latitude && !store.address?.longitude && !store.location?.coordinates;
-    });
-    
-    const driversList = filteredDrivers();
-    const onlineDriversCount = driversList.filter(d => d.isOnline).length;
-    const offlineDriversCount = driversList.filter(d => !d.isOnline).length;
-
-    // تحميل الموقع تلقائياً
+    // تحميل الموقع تلقائياً عند فتح المتاجر
     useEffect(() => {
-        if (activeTab === TABS.STORES && !userLocation) {
-            getUserLocation();
-        }
+        if (activeTab === TABS.STORES && !userLocation) getUserLocation();
     }, [activeTab, getUserLocation, userLocation]);
 
     return (
-        <Box sx={{ p: spacing.page, position: 'relative' }}>
+        <Box sx={{ p: spacing.page }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={spacing.section} flexWrap="wrap" gap={2}>
-                <Typography variant={isMobile ? "h6" : "h5"} fontWeight="bold" sx={{ fontSize: fontSize.h2 }}>
-                    الخرائط والتتبع
-                </Typography>
-                
-                <Badge 
-                    color="primary" 
-                    variant="dot" 
-                    invisible={!isDriversFetching && !isStoresFetching}
-                >
-                    <Button
-                        variant="contained"
-                        startIcon={<Refresh />}
-                        onClick={refreshAllData}
-                        disabled={isDriversFetching || isStoresFetching}
-                        sx={{ textTransform: 'none' }}
-                        size={isMobile ? "small" : "medium"}
-                    >
-                        {isDriversFetching || isStoresFetching ? (
-                            <CircularProgress size={20} />
-                        ) : (
-                            isMobile ? 'تحديث' : 'تحديث الكل'
-                        )}
+                <Typography variant={isMobile ? "h6" : "h5"} fontWeight="bold">الخرائط والتتبع</Typography>
+                <Badge color="primary" variant="dot" invisible={!isDriversFetching}>
+                    <Button variant="contained" startIcon={<Refresh />} onClick={refreshAllData} size={isMobile ? "small" : "medium"}>
+                        تحديث
                     </Button>
                 </Badge>
             </Box>
 
-            {/* تبويبات متجاوبة */}
             <Paper sx={{ mb: spacing.card }}>
-                <Tabs
-                    value={activeTab}
-                    onChange={(e, newValue) => setActiveTab(newValue)}
-                    variant={isMobile ? "scrollable" : "standard"}
-                    scrollButtons={isMobile ? "auto" : false}
-                    sx={{
-                        '& .MuiTab-root': {
-                            minHeight: isMobile ? 40 : 48,
-                            fontSize: isMobile ? '0.75rem' : '0.875rem',
-                            px: isMobile ? 1.5 : 3,
-                        }
-                    }}
-                >
-                    <Tab 
-                        icon={<LocalShipping />} 
-                        iconPosition="start"
-                        label={isMobile ? "المندوبين" : "مواقع المندوبين"}
-                        value={TABS.DRIVERS}
-                    />
-                    <Tab 
-                        icon={<Directions />} 
-                        iconPosition="start"
-                        label={isMobile ? "الطلبات" : "تتبع الطلبات"}
-                        value={TABS.ORDERS}
-                    />
-                    <Tab 
-                        icon={<Storefront />} 
-                        iconPosition="start"
-                        label={isMobile ? "المتاجر" : "المتاجر القريبة"}
-                        value={TABS.STORES}
-                    />
-                    <Tab 
-                        icon={<Search />} 
-                        iconPosition="start"
-                        label="البحث"
-                        value={TABS.SEARCH}
-                    />
+                <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)} variant={isMobile ? "scrollable" : "standard"}>
+                    <Tab icon={<LocalShipping />} iconPosition="start" label="المندوبين" value={TABS.DRIVERS} />
+                    <Tab icon={<Directions />} iconPosition="start" label="الطلبات" value={TABS.ORDERS} />
+                    <Tab icon={<Storefront />} iconPosition="start" label="المتاجر" value={TABS.STORES} />
+                    <Tab icon={<Search />} iconPosition="start" label="البحث" value={TABS.SEARCH} />
                 </Tabs>
             </Paper>
 
@@ -455,184 +339,94 @@ export default function MapPage() {
             {activeTab === TABS.DRIVERS && (
                 <Grid container spacing={spacing.card}>
                     <Grid item xs={12} md={8}>
-                        <Paper sx={{ p: spacing.card, position: 'relative' }}>
-                            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2} flexWrap="wrap" gap={1}>
+                        <Paper sx={{ p: spacing.card }}>
+                            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                                 <Box>
-                                    <Typography variant={isMobile ? "subtitle1" : "h6"} sx={{ fontSize: fontSize.h3 }}>
-                                        مواقع المندوبين
-                                    </Typography>
-                                    <Typography variant="caption" color="textSecondary" component="div">
-                                        {onlineDriversCount} متصل / {offlineDriversCount} غير متصل
+                                    <Typography variant={isMobile ? "subtitle1" : "h6"}>مواقع المندوبين</Typography>
+                                    <Typography variant="caption" color="textSecondary">
+                                        {driversStats.online} متصل | {driversStats.available} متاح | إجمالي {driversStats.total}
                                     </Typography>
                                 </Box>
                                 <Box display="flex" gap={0.5}>
-                                    <SafeTooltip title="تحديث الخريطة">
-                                        <IconButton onClick={refreshAllData} disabled={driversLoading} size="small">
-                                            <Refresh />
-                                        </IconButton>
-                                    </SafeTooltip>
-                                    
-                                    <SafeTooltip title="الفلاتر">
-                                        <IconButton 
-                                            onClick={() => setShowDriverFilters(!showDriverFilters)}
-                                            color={showDriverFilters ? 'primary' : 'default'}
-                                            size="small"
-                                        >
-                                            <FilterList />
-                                        </IconButton>
-                                    </SafeTooltip>
-                                    
-                                    <SafeTooltip title="تكبير">
-                                        <IconButton onClick={handleZoomIn} size="small">
-                                            <ZoomIn />
-                                        </IconButton>
-                                    </SafeTooltip>
-                                    
-                                    <SafeTooltip title="تصغير">
-                                        <IconButton onClick={handleZoomOut} size="small">
-                                            <ZoomOut />
-                                        </IconButton>
-                                    </SafeTooltip>
-                                    
-                                    <SafeTooltip title="موقعي">
-                                        <IconButton onClick={getUserLocation} size="small">
-                                            <MyLocation />
-                                        </IconButton>
-                                    </SafeTooltip>
+                                    <IconButton onClick={refreshAllData} size="small"><Refresh /></IconButton>
+                                    <IconButton onClick={() => setShowDriverFilters(!showDriverFilters)} color={showDriverFilters ? 'primary' : 'default'} size="small"><FilterList /></IconButton>
+                                    <IconButton onClick={() => mapRef.current?.zoomIn?.()} size="small"><ZoomIn /></IconButton>
+                                    <IconButton onClick={() => mapRef.current?.zoomOut?.()} size="small"><ZoomOut /></IconButton>
+                                    <IconButton onClick={getUserLocation} size="small"><MyLocation /></IconButton>
                                 </Box>
                             </Box>
-                            
-                            {/* فلتر المندوبين */}
+
                             <Collapse in={showDriverFilters}>
                                 <Paper sx={{ p: spacing.card, mb: 2, bgcolor: 'action.hover' }}>
                                     <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
                                         <Typography variant="subtitle2">فلترة المندوبين</Typography>
-                                        <Button size="small" onClick={resetFilters} startIcon={<ClearAll />}>
-                                            إعادة تعيين
-                                        </Button>
+                                        <Button size="small" onClick={resetFilters} startIcon={<ClearAll />}>إعادة تعيين</Button>
                                     </Box>
                                     <Grid container spacing={2}>
                                         <Grid item xs={12} sm={6}>
-                                            <FormControlLabel
-                                                control={
-                                                    <Switch
-                                                        checked={driverFilters.showOnlineOnly}
-                                                        onChange={(e) => setDriverFilters({
-                                                            ...driverFilters,
-                                                            showOnlineOnly: e.target.checked,
-                                                            showOfflineOnly: e.target.checked ? false : driverFilters.showOfflineOnly,
-                                                        })}
-                                                        size="small"
-                                                    />
-                                                }
-                                                label="المندوبين المتصلين فقط"
-                                            />
+                                            <FormControlLabel control={<Switch checked={driverFilters.showOnlineOnly} onChange={(e) => setDriverFilters({ ...driverFilters, showOnlineOnly: e.target.checked })} />} label="المتصلين فقط" />
                                         </Grid>
                                         <Grid item xs={12} sm={6}>
-                                            <FormControlLabel
-                                                control={
-                                                    <Switch
-                                                        checked={driverFilters.showOfflineOnly}
-                                                        onChange={(e) => setDriverFilters({
-                                                            ...driverFilters,
-                                                            showOfflineOnly: e.target.checked,
-                                                            showOnlineOnly: e.target.checked ? false : driverFilters.showOnlineOnly,
-                                                        })}
-                                                        size="small"
-                                                    />
-                                                }
-                                                label="المندوبين غير المتصلين"
-                                            />
+                                            <FormControlLabel control={<Switch checked={driverFilters.showAvailableOnly} onChange={(e) => setDriverFilters({ ...driverFilters, showAvailableOnly: e.target.checked })} />} label="المتاحين فقط" />
+                                        </Grid>
+                                        <Grid item xs={12}>
+                                            <TextField select label="الحد الأدنى للتقييم" size="small" value={driverFilters.minRating} onChange={(e) => setDriverFilters({ ...driverFilters, minRating: Number(e.target.value) })}>
+                                                <MenuItem value={0}>الكل</MenuItem>
+                                                <MenuItem value={3}>3 نجوم فأكثر</MenuItem>
+                                                <MenuItem value={4}>4 نجوم فأكثر</MenuItem>
+                                            </TextField>
                                         </Grid>
                                     </Grid>
                                 </Paper>
                             </Collapse>
-                            
+
                             <DriverLocationMap
                                 ref={mapRef}
-                                drivers={driversList}
+                                drivers={filteredDriversList}
                                 selectedDriver={selectedDriver}
                                 onDriverSelect={handleViewDriverLocation}
                                 height={showDriverFilters ? mapHeight - 80 : mapHeight}
                                 center={mapCenter}
                                 zoom={mapZoom}
                                 onZoomChange={setMapZoom}
-                                onMapReady={() => setIsMapReady(true)}
                             />
                         </Paper>
                     </Grid>
+
                     <Grid item xs={12} md={4}>
                         <Paper sx={{ p: spacing.card, height: sidePanelHeight, overflow: 'auto' }}>
-                            <Typography variant={isMobile ? "subtitle1" : "h6"} gutterBottom sx={{ fontSize: fontSize.h3 }}>
-                                قائمة المندوبين
-                            </Typography>
+                            <Typography variant={isMobile ? "subtitle1" : "h6"} gutterBottom>قائمة المندوبين</Typography>
                             {driversLoading ? (
-                                <Box>
-                                    {[1, 2, 3, 4].map(i => (
-                                        <Box key={i} sx={{ mb: 1, height: 72, bgcolor: 'action.hover', borderRadius: 1 }} />
-                                    ))}
-                                </Box>
+                                <Box>{[1, 2, 3].map(i => <Box key={i} sx={{ mb: 1, height: 70, bgcolor: 'action.hover', borderRadius: 1 }} />)}</Box>
+                            ) : filteredDriversList.length === 0 ? (
+                                <Alert severity="info">لا يوجد مندوبين مطابقين للفلتر</Alert>
                             ) : (
                                 <List sx={{ p: 0 }}>
-                                    {driversList.map((driver) => (
-                                        // ✅ FIXED: استخدام driver._id بدلاً من driver.id
-                                        <ListItem
-                                            key={driver._id}
-                                            component="div"
-                                            selected={selectedDriver?._id === driver._id}
-                                            onClick={() => handleViewDriverLocation(driver)}
-                                            sx={{
-                                                borderRadius: 1,
-                                                mb: 1,
-                                                cursor: 'pointer',
-                                                bgcolor: selectedDriver?._id === driver._id ? 'action.selected' : 'transparent',
-                                                transition: 'all 0.2s ease',
-                                                p: isMobile ? 1 : 1.5,
-                                                '&:hover': {
-                                                    transform: isMobile ? 'none' : 'translateX(-4px)',
-                                                    bgcolor: 'action.hover',
-                                                },
-                                            }}
-                                        >
-                                            <ListItemAvatar>
-                                                <Avatar src={driver.avatar} sx={{ width: isMobile ? 32 : 40, height: isMobile ? 32 : 40 }}>
-                                                    {driver.name?.charAt(0)}
-                                                </Avatar>
-                                            </ListItemAvatar>
-                                            <ListItemText
-                                                primary={
-                                                    <Box component="span" display="flex" alignItems="center" gap={1} flexWrap="wrap">
-                                                        <Typography variant="body2" fontWeight="bold" component="span">
-                                                            {driver.name}
-                                                        </Typography>
-                                                        {driver.rating && (
-                                                            <Rating value={driver.rating} readOnly size="small" />
-                                                        )}
-                                                    </Box>
-                                                }
-                                                secondary={
-                                                    <Box component="span">
-                                                        <Chip
-                                                            label={driver.isOnline ? '🟢 متصل' : '⚫ غير متصل'}
-                                                            size="small"
-                                                            color={driver.isOnline ? 'success' : 'default'}
-                                                            sx={{ height: 20, fontSize: 10, mt: 0.5 }}
-                                                        />
-                                                        {driver.location && (
-                                                            <Typography variant="caption" display="block" color="textSecondary" mt={0.5}>
-                                                                {new Date(driver.location.updatedAt).toLocaleTimeString()}
-                                                            </Typography>
-                                                        )}
-                                                    </Box>
-                                                }
-                                            />
-                                        </ListItem>
-                                    ))}
-                                    {driversList.length === 0 && (
-                                        <Alert severity="info" sx={{ mt: 2 }}>
-                                            لا يوجد مندوبين مطابقين للفلتر المحدد
-                                        </Alert>
-                                    )}
+                                    {filteredDriversList.map((driver) => {
+                                        const status = getDriverStatus(driver);
+                                        const coords = getDriverCoords(driver);
+                                        return (
+                                            <ListItem
+                                                key={driver._id}
+                                                onClick={() => handleViewDriverLocation(driver)}
+                                                sx={{ borderRadius: 1, mb: 1, cursor: 'pointer', borderLeft: `3px solid ${status.color}`, '&:hover': { bgcolor: 'action.hover' } }}
+                                            >
+                                                <ListItemAvatar>
+                                                    <Avatar src={driver.image} sx={{ width: 40, height: 40 }}>{driver.name?.charAt(0)}</Avatar>
+                                                </ListItemAvatar>
+                                                <ListItemText
+                                                    primary={driver.name}
+                                                    secondary={
+                                                        <Box>
+                                                            <Chip label={`${status.icon} ${status.label}`} size="small" sx={{ height: 20, fontSize: 10, backgroundColor: `${status.color}20`, color: status.color }} />
+                                                            {driver.rating > 0 && <Rating value={driver.rating} readOnly size="small" sx={{ mt: 0.5 }} />}
+                                                            {coords && <Typography variant="caption" display="block" color="textSecondary">📍 {coords.lat.toFixed(4)}°, {coords.lng.toFixed(4)}°</Typography>}
+                                                        </Box>
+                                                    }
+                                                />
+                                            </ListItem>
+                                        );
+                                    })}
                                 </List>
                             )}
                         </Paper>
@@ -645,98 +439,25 @@ export default function MapPage() {
                 <Grid container spacing={spacing.card}>
                     <Grid item xs={12} md={8}>
                         <Paper sx={{ p: spacing.card }}>
-                            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2} flexWrap="wrap" gap={1}>
-                                <Typography variant={isMobile ? "subtitle1" : "h6"} sx={{ fontSize: fontSize.h3 }}>
-                                    تتبع الطلب {selectedOrder && `#${selectedOrder._id.slice(-6)}`}
-                                </Typography>
-                                <Box display="flex" gap={0.5}>
-                                    <SafeTooltip title="تحديث الخريطة">
-                                        <IconButton onClick={refreshAllData} size="small">
-                                            <Refresh />
-                                        </IconButton>
-                                    </SafeTooltip>
-                                    <SafeTooltip title="تكبير">
-                                        <IconButton onClick={handleZoomIn} size="small">
-                                            <ZoomIn />
-                                        </IconButton>
-                                    </SafeTooltip>
-                                    <SafeTooltip title="تصغير">
-                                        <IconButton onClick={handleZoomOut} size="small">
-                                            <ZoomOut />
-                                        </IconButton>
-                                    </SafeTooltip>
-                                </Box>
-                            </Box>
-                            <OrderTrackingMap
-                                orderId={selectedOrder?._id}
-                                height={mapHeight}
-                                center={mapCenter}
-                                zoom={mapZoom}
-                            />
+                            <OrderTrackingMap orderId={selectedOrder?._id} height={mapHeight} center={mapCenter} zoom={mapZoom} />
                         </Paper>
                     </Grid>
                     <Grid item xs={12} md={4}>
                         <Paper sx={{ p: spacing.card, height: sidePanelHeight, overflow: 'auto' }}>
-                            <Typography variant={isMobile ? "subtitle1" : "h6"} gutterBottom sx={{ fontSize: fontSize.h3 }}>
-                                الطلبات النشطة
-                            </Typography>
+                            <Typography variant={isMobile ? "subtitle1" : "h6"} gutterBottom>الطلبات النشطة</Typography>
                             {ordersLoading ? (
-                                <Box>
-                                    {[1, 2, 3].map(i => (
-                                        <Box key={i} sx={{ mb: 1, height: 100, bgcolor: 'action.hover', borderRadius: 1 }} />
-                                    ))}
-                                </Box>
+                                <Box>{[1, 2].map(i => <Box key={i} sx={{ mb: 1, height: 80, bgcolor: 'action.hover', borderRadius: 1 }} />)}</Box>
                             ) : (
                                 <List sx={{ p: 0 }}>
-                                    {(activeOrders?.data?.orders || []).map((order) => (
-                                        // ✅ FIXED: استخدام order._id بدلاً من order.id
-                                        <ListItem
-                                            key={order._id}
-                                            component="div"
-                                            selected={selectedOrder?._id === order._id}
-                                            onClick={() => handleTrackOrder(order)}
-                                            sx={{ 
-                                                borderRadius: 1, 
-                                                mb: 1,
-                                                cursor: 'pointer',
-                                                p: isMobile ? 1 : 1.5,
-                                                transition: 'all 0.2s ease',
-                                                '&:hover': {
-                                                    transform: isMobile ? 'none' : 'translateX(-4px)',
-                                                    bgcolor: 'action.hover',
-                                                },
-                                            }}
-                                        >
+                                    {(activeOrders?.data?.orders || []).map(order => (
+                                        <ListItem key={order._id} selected={selectedOrder?._id === order._id} onClick={() => setSelectedOrder(order)} sx={{ borderRadius: 1, mb: 1, cursor: 'pointer' }}>
                                             <ListItemText
-                                                primary={
-                                                    <Typography variant="body2" fontWeight="bold" component="span">
-                                                        طلب #{order._id.slice(-6)}
-                                                    </Typography>
-                                                }
-                                                secondary={
-                                                    <Box component="span">
-                                                        <Typography variant="caption" display="block" color="textSecondary" component="span">
-                                                            {order.store?.name || order.storeId}
-                                                        </Typography>
-                                                        <Chip
-                                                            label={order.status === 'accepted' ? 'تم القبول' : 
-                                                                   order.status === 'preparing' ? 'قيد التحضير' :
-                                                                   order.status === 'ready' ? 'جاهز' :
-                                                                   order.status === 'out_for_delivery' ? 'قيد التوصيل' : order.status}
-                                                            size="small"
-                                                            color={order.status === 'out_for_delivery' ? 'warning' : 'info'}
-                                                            sx={{ mt: 0.5 }}
-                                                        />
-                                                    </Box>
-                                                }
+                                                primary={`طلب #${order._id.slice(-6)}`}
+                                                secondary={<Chip label={order.status === 'accepted' ? 'تم القبول' : order.status === 'ready' ? 'جاهز' : order.status === 'picked' ? 'قيد التوصيل' : order.status} size="small" color="info" />}
                                             />
                                         </ListItem>
                                     ))}
-                                    {(activeOrders?.data?.orders || []).length === 0 && (
-                                        <Alert severity="info" sx={{ mt: 2 }}>
-                                            لا توجد طلبات نشطة
-                                        </Alert>
-                                    )}
+                                    {(activeOrders?.data?.orders || []).length === 0 && <Alert severity="info">لا توجد طلبات نشطة</Alert>}
                                 </List>
                             )}
                         </Paper>
@@ -748,175 +469,39 @@ export default function MapPage() {
             {activeTab === TABS.STORES && (
                 <Grid container spacing={spacing.card}>
                     <Grid item xs={12} md={8}>
-                        <Paper sx={{ p: spacing.card, position: 'relative' }}>
-                            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2} flexWrap="wrap" gap={1}>
-                                <Typography variant={isMobile ? "subtitle1" : "h6"} sx={{ fontSize: fontSize.h3 }}>
-                                    المتاجر القريبة
-                                </Typography>
+                        <Paper sx={{ p: spacing.card }}>
+                            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                                <Typography variant={isMobile ? "subtitle1" : "h6"}>المتاجر القريبة</Typography>
                                 <Box display="flex" gap={0.5}>
-                                    <SafeTooltip title="تحديث الخريطة">
-                                        <IconButton onClick={refreshAllData} disabled={isStoresFetching} size="small">
-                                            <Refresh />
-                                        </IconButton>
-                                    </SafeTooltip>
-                                    {storesWithoutCoords.length > 0 && !isMobile && (
-                                        <SafeTooltip title={`تحديث مواقع ${storesWithoutCoords.length} متجر`}>
-                                            <IconButton 
-                                                onClick={handleUpdateStoresCoordinates} 
-                                                disabled={updatingStores}
-                                                size="small"
-                                                color="warning"
-                                            >
-                                                <Update />
-                                            </IconButton>
-                                        </SafeTooltip>
-                                    )}
-                                    <SafeTooltip title="موقعي">
-                                        <span style={{ display: 'inline-flex' }}>
-                                            <IconButton 
-                                                onClick={getUserLocation} 
-                                                disabled={loadingLocation}
-                                                size="small"
-                                            >
-                                                {loadingLocation ? <CircularProgress size={20} /> : <MyLocation />}
-                                            </IconButton>
-                                        </span>
-                                    </SafeTooltip>
-                                    <SafeTooltip title="تكبير">
-                                        <IconButton onClick={handleZoomIn} size="small">
-                                            <ZoomIn />
-                                        </IconButton>
-                                    </SafeTooltip>
-                                    <SafeTooltip title="تصغير">
-                                        <IconButton onClick={handleZoomOut} size="small">
-                                            <ZoomOut />
-                                        </IconButton>
-                                    </SafeTooltip>
+                                    <IconButton onClick={refreshAllData} size="small"><Refresh /></IconButton>
+                                    <IconButton onClick={getUserLocation} disabled={loadingLocation} size="small">{loadingLocation ? <CircularProgress size={20} /> : <MyLocation />}</IconButton>
+                                    <IconButton onClick={() => mapRef.current?.zoomIn?.()} size="small"><ZoomIn /></IconButton>
+                                    <IconButton onClick={() => mapRef.current?.zoomOut?.()} size="small"><ZoomOut /></IconButton>
                                 </Box>
                             </Box>
-                            
-                            {error && (
-                                <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setError(null)}>
-                                    {error}
-                                </Alert>
-                            )}
-                            
-                            <StoreMap
-                                ref={mapRef}
-                                stores={storesList}
-                                userLocation={userLocation}
-                                onStoreSelect={handleStoreSelect}
-                                onRefresh={handleUpdateStoresCoordinates}
-                                height={mapHeight}
-                                center={mapCenter}
-                                zoom={mapZoom}
-                                onZoomChange={setMapZoom}
-                            />
+                            {error && <Alert severity="warning" sx={{ mb: 2 }}>{error}</Alert>}
+                            <StoreMap ref={mapRef} stores={nearbyStores.length ? nearbyStores : (allStores?.data || [])} userLocation={userLocation} height={mapHeight} center={mapCenter} zoom={mapZoom} onZoomChange={setMapZoom} />
                         </Paper>
                     </Grid>
                     <Grid item xs={12} md={4}>
                         <Paper sx={{ p: spacing.card, height: sidePanelHeight, overflow: 'auto' }}>
-                            <Typography variant={isMobile ? "subtitle1" : "h6"} gutterBottom sx={{ fontSize: fontSize.h3 }}>
-                                المتاجر القريبة
-                                {storesWithoutCoords.length > 0 && !isMobile && (
-                                    <Chip 
-                                        size="small" 
-                                        label={`${storesWithoutCoords.length} بدون إحداثيات`}
-                                        color="warning"
-                                        sx={{ ml: 1 }}
-                                    />
-                                )}
-                            </Typography>
-                            
+                            <Typography variant={isMobile ? "subtitle1" : "h6"} gutterBottom>المتاجر القريبة</Typography>
                             {!userLocation ? (
-                                <Alert severity="info" sx={{ mb: 2 }}>
-                                    اضغط على أيقونة "موقعي" لعرض المتاجر القريبة منك
-                                </Alert>
+                                <Alert severity="info">اضغط على أيقونة "موقعي" لعرض المتاجر</Alert>
                             ) : storesLoading ? (
-                                <Box>
-                                    {[1, 2, 3, 4].map(i => (
-                                        <Box key={i} sx={{ mb: 1, height: 80, bgcolor: 'action.hover', borderRadius: 1 }} />
-                                    ))}
-                                </Box>
+                                <Box>{[1, 2, 3].map(i => <Box key={i} sx={{ mb: 1, height: 70, bgcolor: 'action.hover', borderRadius: 1 }} />)}</Box>
                             ) : (
                                 <List sx={{ p: 0 }}>
-                                    {storesList.slice(0, isMobile ? 5 : 10).map((store) => {
-                                        const hasCoords = store.address?.latitude || store.location?.coordinates;
-                                        return (
-                                            // ✅ FIXED: استخدام store._id بدلاً من store.id
-                                            <ListItem 
-                                                key={store._id} 
-                                                component="div"
-                                                sx={{ 
-                                                    borderRadius: 1, 
-                                                    mb: 1,
-                                                    p: isMobile ? 1 : 1.5,
-                                                    opacity: hasCoords ? 1 : 0.6,
-                                                    bgcolor: !hasCoords ? 'action.hover' : 'transparent',
-                                                    transition: 'all 0.2s ease',
-                                                    '&:hover': {
-                                                        transform: isMobile ? 'none' : 'translateX(-4px)',
-                                                        bgcolor: 'action.selected',
-                                                    },
-                                                }}
-                                            >
-                                                <ListItemAvatar>
-                                                    <Avatar src={store.logo} sx={{ width: isMobile ? 32 : 40, height: isMobile ? 32 : 40 }}>
-                                                        <Storefront />
-                                                    </Avatar>
-                                                </ListItemAvatar>
-                                                <ListItemText
-                                                    primary={
-                                                        <Box component="span" display="flex" alignItems="center" gap={1} flexWrap="wrap">
-                                                            <Typography variant="body2" fontWeight="bold" component="span">
-                                                                {store.name}
-                                                            </Typography>
-                                                        </Box>
-                                                    }
-                                                    secondary={
-                                                        <Box component="span">
-                                                            <Rating 
-                                                                value={store.averageRating || 0} 
-                                                                readOnly 
-                                                                size="small" 
-                                                            />
-                                                            <Typography variant="caption" display="block" color="textSecondary" component="span">
-                                                                {store.category} 
-                                                                {store.distance && ` • ${store.distance.toFixed(1)} كم`}
-                                                            </Typography>
-                                                        </Box>
-                                                    }
-                                                />
-                                            </ListItem>
-                                        );
-                                    })}
-                                    {storesList.length === 0 && (
-                                        <Alert severity="info" sx={{ mt: 2 }}>
-                                            لا توجد متاجر قريبة
-                                        </Alert>
-                                    )}
+                                    {(nearbyStores.length ? nearbyStores : (allStores?.data || [])).slice(0, 10).map(store => (
+                                        <ListItem key={store._id} sx={{ borderRadius: 1, mb: 1 }}>
+                                            <ListItemAvatar><Avatar src={store.logo}><Storefront /></Avatar></ListItemAvatar>
+                                            <ListItemText primary={store.name} secondary={<><Rating value={store.averageRating || 0} readOnly size="small" /><Typography variant="caption" display="block">{store.category}</Typography></>} />
+                                        </ListItem>
+                                    ))}
+                                    {nearbyStores.length === 0 && (allStores?.data || []).length === 0 && <Alert severity="info">لا توجد متاجر</Alert>}
                                 </List>
                             )}
-                            
-                            {storesWithoutCoords.length > 0 && isMobile && (
-                                <Button
-                                    fullWidth
-                                    variant="outlined"
-                                    size="small"
-                                    startIcon={<Update />}
-                                    onClick={handleUpdateStoresCoordinates}
-                                    disabled={updatingStores}
-                                    sx={{ mt: 2 }}
-                                >
-                                    {updatingStores ? <CircularProgress size={20} /> : `تحديث مواقع ${storesWithoutCoords.length} متجر`}
-                                </Button>
-                            )}
-                            
-                            {storesWithoutCoords.length > 0 && !isMobile && (
-                                <Alert severity="warning" sx={{ mt: 2 }}>
-                                    يوجد {storesWithoutCoords.length} متجر بدون إحداثيات دقيقة.
-                                </Alert>
-                            )}
+                            <Button fullWidth variant="outlined" startIcon={<Update />} onClick={handleUpdateStoresCoordinates} disabled={updatingStores} sx={{ mt: 2 }}>تحديث مواقع المتاجر</Button>
                         </Paper>
                     </Grid>
                 </Grid>
@@ -925,103 +510,36 @@ export default function MapPage() {
             {/* تبويب البحث */}
             {activeTab === TABS.SEARCH && (
                 <Paper sx={{ p: spacing.card }}>
-                    <Typography variant={isMobile ? "subtitle1" : "h6"} gutterBottom sx={{ fontSize: fontSize.h3 }}>
-                        البحث عن موقع
-                    </Typography>
+                    <Typography variant={isMobile ? "subtitle1" : "h6"} gutterBottom>البحث عن موقع</Typography>
                     <Box display="flex" gap={2} mb={3} flexWrap="wrap">
-                        <TextField
-                            fullWidth
-                            label="ابحث عن موقع، شارع، مدينة..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-                            size={isMobile ? "small" : "medium"}
-                            sx={{ flex: 1 }}
-                        />
-                        <Button
-                            variant="contained"
-                            startIcon={<Search />}
-                            onClick={handleSearch}
-                            size={isMobile ? "small" : "medium"}
-                        >
-                            بحث
-                        </Button>
+                        <TextField fullWidth label="ابحث عن موقع..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSearch()} size={isMobile ? "small" : "medium"} sx={{ flex: 1 }} />
+                        <Button variant="contained" startIcon={<Search />} onClick={handleSearch} size={isMobile ? "small" : "medium"}>بحث</Button>
                     </Box>
-
                     {searchResults.length > 0 && (
                         <List>
-                            {searchResults.slice(0, isMobile ? 5 : 10).map((result, index) => (
-                                <ListItem key={index} divider sx={{ flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center' }}>
-                                    <ListItemAvatar>
-                                        <Avatar>
-                                            <LocationOn />
-                                        </Avatar>
-                                    </ListItemAvatar>
-                                    <ListItemText
-                                        primary={result.display_name || result.name}
-                                        secondary={result.type}
-                                        sx={{ mb: isMobile ? 1 : 0 }}
-                                    />
-                                    <Button
-                                        size="small"
-                                        startIcon={<Directions />}
-                                        onClick={() => {
-                                            setMapCenter({
-                                                lat: parseFloat(result.lat),
-                                                lng: parseFloat(result.lon),
-                                            });
-                                            setActiveTab(TABS.STORES);
-                                        }}
-                                        fullWidth={isMobile}
-                                    >
-                                        عرض على الخريطة
-                                    </Button>
+                            {searchResults.slice(0, 10).map((result, idx) => (
+                                <ListItem key={idx} divider>
+                                    <ListItemAvatar><Avatar><LocationOn /></Avatar></ListItemAvatar>
+                                    <ListItemText primary={result.display_name || result.name} />
+                                    <Button size="small" startIcon={<Directions />} onClick={() => { setMapCenter({ lat: parseFloat(result.lat), lng: parseFloat(result.lon) }); setActiveTab(TABS.STORES); }}>عرض</Button>
                                 </ListItem>
                             ))}
                         </List>
                     )}
-                    
-                    {searchResults.length === 0 && searchQuery && (
-                        <Alert severity="info">
-                            لا توجد نتائج للبحث عن "{searchQuery}"
-                        </Alert>
-                    )}
+                    {searchResults.length === 0 && searchQuery && <Alert severity="info">لا توجد نتائج</Alert>}
                 </Paper>
             )}
 
-            {/* Floating Action Button - للهواتف فقط */}
             {isMobile && (
                 <Zoom in={true}>
-                    <Fab
-                        color="primary"
-                        size="small"
-                        sx={{
-                            position: 'fixed',
-                            bottom: 16,
-                            right: 16,
-                            zIndex: 1000,
-                        }}
-                        onClick={refreshAllData}
-                    >
+                    <Fab color="primary" size="small" sx={{ position: 'fixed', bottom: 16, right: 16, zIndex: 1000 }} onClick={refreshAllData}>
                         <Refresh />
                     </Fab>
                 </Zoom>
             )}
 
-            {/* Snackbar */}
-            <Snackbar
-                open={snackbar.open}
-                autoHideDuration={4000}
-                onClose={() => setSnackbar({ ...snackbar, open: false })}
-                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-            >
-                <Alert 
-                    onClose={() => setSnackbar({ ...snackbar, open: false })} 
-                    severity={snackbar.severity}
-                    sx={{ width: '100%' }}
-                >
-                    {snackbar.message}
-                </Alert>
+            <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+                <Alert severity={snackbar.severity}>{snackbar.message}</Alert>
             </Snackbar>
         </Box>
     );

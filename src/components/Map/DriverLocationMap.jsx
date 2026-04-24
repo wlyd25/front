@@ -1,10 +1,8 @@
-// src/components/Map/DriverLocationMap.jsx - نسخة مصححة بالكامل
+// src/components/Map/DriverLocationMap.jsx - النسخة النهائية
 
-import { useEffect, useRef, forwardRef, useImperativeHandle, useCallback, useMemo } from 'react';
+import { useEffect, useRef, forwardRef, useImperativeHandle, useCallback, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { getDriverCoordinates, isValidCoordinate, formatDistance } from '../../utils/mapHelpers';
-import { getId } from '../../utils/helpers';
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || '';
 
@@ -20,181 +18,172 @@ const DriverLocationMap = forwardRef(({
     onMapReady,
     showUserLocation = true,
     userLocation = null,
-    refreshInterval = 10000,
+    refreshInterval = 30000,
     fitBoundsOnLoad = true,
 }, ref) => {
     const mapContainer = useRef(null);
     const map = useRef(null);
-    const markers = useRef({});
+    const markers = useRef([]);  // ✅ تغيير إلى مصفوفة مثل StoreMap
     const userMarker = useRef(null);
     const refreshIntervalRef = useRef(null);
-    const boundsRef = useRef(null);
 
-    // ✅ الحصول على المندوبين الصالحين (ذوي إحداثيات صحيحة)
-    const getValidDrivers = useCallback(() => {
-        return drivers.filter(driver => {
-            const coords = getDriverCoordinates(driver);
-            return coords !== null && isValidCoordinate(coords.lat, coords.lng);
-        });
-    }, [drivers]);
-
-    // ✅ حساب المركز المبدئي للخريطة
-    const getInitialCenter = useCallback(() => {
-        if (center && isValidCoordinate(center.lat, center.lng)) {
-            return [center.lng, center.lat];
+    // ✅ الحصول على إحداثيات المندوب (نفس طريقة StoreMap)
+    const getDriverCoordinates = useCallback((driver) => {
+        if (!driver) return null;
+        
+        // نفس تنسيق StoreMap
+        const coords = driver?.driverInfo?.currentLocation?.coordinates;
+        if (coords && Array.isArray(coords) && coords.length >= 2) {
+            return {
+                lng: parseFloat(coords[0]),
+                lat: parseFloat(coords[1])
+            };
         }
         
-        if (userLocation && isValidCoordinate(userLocation.lat, userLocation.lng) && showUserLocation) {
-            return [userLocation.lng, userLocation.lat];
+        const locationCoords = driver?.location?.coordinates;
+        if (locationCoords && Array.isArray(locationCoords) && locationCoords.length >= 2) {
+            return {
+                lng: parseFloat(locationCoords[0]),
+                lat: parseFloat(locationCoords[1])
+            };
         }
         
-        const validDrivers = getValidDrivers();
-        if (validDrivers.length > 0) {
-            const firstDriver = validDrivers[0];
-            const coords = getDriverCoordinates(firstDriver);
-            if (coords) {
-                return [coords.lng, coords.lat];
-            }
-        }
-        
-        return [2.1254, 13.5127]; // نيامي، النيجر
-    }, [center, userLocation, showUserLocation, getValidDrivers]);
+        return null;
+    }, []);
 
-    // ✅ ضبط حدود الخريطة لتشمل جميع المندوبين
-    const fitBoundsToDrivers = useCallback(() => {
+    // ✅ الحصول على لون الحالة (مبسط)
+    const getDriverStatusColor = useCallback((driver) => {
+        if (!driver.isActive) return '#F44336';      // أحمر - معطل
+        if (!driver.isOnline) return '#9E9E9E';       // رمادي - غير متصل
+        if (driver.currentOrder) return '#FF9800';    // برتقالي - مشغول
+        if (driver.driverInfo?.isAvailable) return '#4CAF50'; // أخضر - متاح
+        return '#FFC107'; // أصفر
+    }, []);
+
+    // ✅ إنشاء عنصر العلامة (مثل StoreMap تماماً)
+    const createMarkerElement = useCallback((driver, color) => {
+        const driverName = driver.name || 'مندوب';
+        const initial = driverName.charAt(0).toUpperCase();
+        const imageUrl = driver.image || driver.avatar;
+        
+        const el = document.createElement('div');
+        el.className = 'driver-marker';
+        el.style.cssText = `
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: ${color};
+            border: 3px solid white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s;
+        `;
+        
+        // صورة أو حرف
+        if (imageUrl && imageUrl.startsWith('http')) {
+            const img = document.createElement('img');
+            img.src = imageUrl;
+            img.style.cssText = `
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                border-radius: 50%;
+            `;
+            img.onerror = () => {
+                el.innerHTML = `<span style="font-size: 20px; font-weight: bold; color: white;">${initial}</span>`;
+            };
+            el.appendChild(img);
+        } else {
+            el.innerHTML = `<span style="font-size: 20px; font-weight: bold; color: white;">${initial}</span>`;
+        }
+        
+        // نقطة الحالة
+        const dot = document.createElement('div');
+        dot.style.cssText = `
+            position: absolute;
+            bottom: -2px;
+            right: -2px;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: ${color};
+            border: 2px solid white;
+        `;
+        el.appendChild(dot);
+        
+        return el;
+    }, []);
+
+    // ✅ تحديث العلامات (مثل StoreMap تماماً)
+    const updateMarkers = useCallback(() => {
         if (!map.current) return;
         
-        const validDrivers = getValidDrivers();
-        if (validDrivers.length === 0) return;
+        // إزالة العلامات القديمة
+        markers.current.forEach(marker => marker.remove());
+        markers.current = [];
         
-        const bounds = new mapboxgl.LngLatBounds();
-        
-        validDrivers.forEach(driver => {
-            const coords = getDriverCoordinates(driver);
-            if (coords) {
-                bounds.extend([coords.lng, coords.lat]);
-            }
-        });
-        
-        if (showUserLocation && userLocation && isValidCoordinate(userLocation.lat, userLocation.lng)) {
-            bounds.extend([userLocation.lng, userLocation.lat]);
-        }
-        
-        if (!bounds.isEmpty()) {
-            map.current.fitBounds(bounds, { padding: 50 });
-        }
-    }, [getValidDrivers, showUserLocation, userLocation]);
-
-    // ✅ إضافة أو تحديث علامات المندوبين
-    const updateDriverMarkers = useCallback(() => {
-        if (!map.current) return;
-        
-        const validDrivers = getValidDrivers();
-        const currentMarkerIds = Object.keys(markers.current);
-        const newDriverIds = new Set();
+        // إضافة العلامات الجديدة
+        const validDrivers = drivers.filter(d => getDriverCoordinates(d) !== null);
         
         validDrivers.forEach(driver => {
-            const driverId = getId(driver);
-            if (!driverId) return;
-            
-            newDriverIds.add(driverId);
             const coords = getDriverCoordinates(driver);
             if (!coords) return;
             
-            const isOnline = driver.isOnline;
-            const markerColor = isOnline ? '#4CAF50' : '#9E9E9E';
+            const color = getDriverStatusColor(driver);
+            const markerElement = createMarkerElement(driver, color);
             
-            // تحديث العلامة الموجودة أو إنشاء علامة جديدة
-            if (markers.current[driverId]) {
-                // تحديث موقع العلامة
-                markers.current[driverId].setLngLat([coords.lng, coords.lat]);
-                
-                // تحديث لون العلامة إذا تغيرت الحالة
-                const markerElement = markers.current[driverId].getElement();
-                const currentColor = markerElement.querySelector('svg circle')?.getAttribute('fill');
-                if (currentColor !== markerColor) {
-                    markers.current[driverId].remove();
-                    markers.current[driverId] = null;
-                }
-            }
-            
-            if (!markers.current[driverId]) {
-                const popup = new mapboxgl.Popup({ offset: 25 })
-                    .setHTML(`
-                        <div style="padding: 8px; direction: rtl; min-width: 150px;">
-                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                                <img src="${driver.avatar || ''}" style="width: 32px; height: 32px; border-radius: 50%;" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'32\' height=\'32\' viewBox=\'0 0 24 24\'%3E%3Ccircle cx=\'12\' cy=\'12\' r=\'12\' fill=\'%23999\'/%3E%3Ctext x=\'12\' y=\'16\' text-anchor=\'middle\' fill=\'white\' font-size=\'12\'%3E${driver.name?.charAt(0) || 'D'}%3C/text%3E%3C/svg%3E'"/>
-                                <div>
-                                    <strong>${driver.name || 'مندوب'}</strong><br/>
-                                    ${isOnline ? '<span style="color: #4CAF50;">🟢 متصل</span>' : '<span style="color: #9E9E9E;">⚫ غير متصل</span>'}
-                                </div>
-                            </div>
-                            ${driver.rating ? `<div>⭐ ${driver.rating.toFixed(1)} / 5</div>` : ''}
-                            ${driver.totalDeliveries ? `<div>📦 ${driver.totalDeliveries} توصيلة</div>` : ''}
-                            ${driver.location?.updatedAt ? `<div><small>🕐 ${new Date(driver.location.updatedAt).toLocaleTimeString('ar-SA')}</small></div>` : ''}
-                            <button 
-                                onclick="window.selectDriver_${driverId}()"
-                                style="
-                                    margin-top: 8px;
-                                    padding: 4px 12px;
-                                    background: #1976d2;
-                                    color: white;
-                                    border: none;
-                                    border-radius: 4px;
-                                    cursor: pointer;
-                                    font-size: 12px;
-                                    width: 100%;
-                                "
-                            >
-                                عرض التفاصيل
-                            </button>
+            // محتوى البوب اب
+            const popupContent = `
+                <div style="padding: 12px; direction: rtl; min-width: 200px;">
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                        <img 
+                            src="${driver.image || ''}" 
+                            style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;" 
+                            onerror="this.style.display='none'"
+                        />
+                        <div>
+                            <strong style="font-size: 14px;">${driver.name || 'مندوب'}</strong><br/>
+                            <span style="font-size: 11px; color: #666;">${driver.phone || ''}</span>
                         </div>
-                    `);
-                
-                const marker = new mapboxgl.Marker({ color: markerColor })
-                    .setLngLat([coords.lng, coords.lat])
-                    .setPopup(popup)
-                    .addTo(map.current);
-                
-                // إضافة حدث النقر
-                marker.getElement().addEventListener('click', () => {
-                    if (onDriverClick) onDriverClick(driver);
-                    if (onDriverSelect) onDriverSelect(driver);
-                });
-                
-                markers.current[driverId] = marker;
-                
-                // ربط الدالة العالمية
-                window[`selectDriver_${driverId}`] = () => {
-                    if (onDriverSelect) onDriverSelect(driver);
-                };
-            }
+                    </div>
+                    <div style="font-size: 11px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #eee;">
+                        ⭐ التقييم: ${driver.rating || 'جديد'}
+                    </div>
+                </div>
+            `;
+            
+            const popup = new mapboxgl.Popup({ offset: 25, closeButton: false })
+                .setHTML(popupContent);
+            
+            const marker = new mapboxgl.Marker({ element: markerElement })
+                .setLngLat([coords.lng, coords.lat])
+                .setPopup(popup)
+                .addTo(map.current);
+            
+            // إضافة حدث النقر
+            marker.getElement().addEventListener('click', () => {
+                if (onDriverClick) onDriverClick(driver);
+                if (onDriverSelect) onDriverSelect(driver);
+            });
+            
+            markers.current.push(marker);
         });
         
-        // إزالة العلامات القديمة
-        currentMarkerIds.forEach(markerId => {
-            if (!newDriverIds.has(markerId) && markers.current[markerId]) {
-                markers.current[markerId].remove();
-                delete markers.current[markerId];
-                delete window[`selectDriver_${markerId}`];
+        // ضبط حدود الخريطة في أول تحميل
+        if (fitBoundsOnLoad && validDrivers.length > 0) {
+            const bounds = new mapboxgl.LngLatBounds();
+            validDrivers.forEach(driver => {
+                const coords = getDriverCoordinates(driver);
+                if (coords) bounds.extend([coords.lng, coords.lat]);
+            });
+            if (!bounds.isEmpty()) {
+                map.current.fitBounds(bounds, { padding: 50 });
             }
-        });
-        
-        // تمييز المندوب المحدد
-        const selectedId = getId(selectedDriver);
-        Object.entries(markers.current).forEach(([id, marker]) => {
-            const markerElement = marker.getElement();
-            if (id === selectedId) {
-                markerElement.style.transform = 'scale(1.2)';
-                markerElement.style.zIndex = '1000';
-                marker.togglePopup();
-            } else {
-                markerElement.style.transform = '';
-                markerElement.style.zIndex = '';
-            }
-        });
-        
-    }, [drivers, selectedDriver, getValidDrivers, onDriverSelect, onDriverClick]);
+        }
+    }, [drivers, getDriverCoordinates, getDriverStatusColor, createMarkerElement, onDriverSelect, onDriverClick, fitBoundsOnLoad]);
 
     // ✅ تحديث موقع المستخدم
     const updateUserLocation = useCallback(() => {
@@ -205,103 +194,89 @@ const DriverLocationMap = forwardRef(({
             userMarker.current = null;
         }
         
-        if (showUserLocation && userLocation && isValidCoordinate(userLocation.lat, userLocation.lng)) {
+        if (showUserLocation && userLocation && userLocation.lat && userLocation.lng) {
             userMarker.current = new mapboxgl.Marker({ color: '#2196F3' })
                 .setLngLat([userLocation.lng, userLocation.lat])
-                .setPopup(new mapboxgl.Popup().setHTML('<strong>📍 موقعك الحالي</strong>'))
+                .setPopup(new mapboxgl.Popup({ closeButton: false }).setHTML('<div style="padding: 8px;"><strong>📍 موقعك الحالي</strong></div>'))
                 .addTo(map.current);
         }
     }, [showUserLocation, userLocation]);
 
-    // ✅ تعريف الدوال التي يمكن استدعاؤها من الخارج
+    // ✅ دوال التحكم
     useImperativeHandle(ref, () => ({
-        zoomIn: () => {
-            if (map.current) map.current.zoomIn();
-        },
-        zoomOut: () => {
-            if (map.current) map.current.zoomOut();
-        },
+        zoomIn: () => map.current?.zoomIn(),
+        zoomOut: () => map.current?.zoomOut(),
         fitBounds: () => {
-            fitBoundsToDrivers();
+            const validDrivers = drivers.filter(d => getDriverCoordinates(d) !== null);
+            if (validDrivers.length === 0) return;
+            const bounds = new mapboxgl.LngLatBounds();
+            validDrivers.forEach(driver => {
+                const coords = getDriverCoordinates(driver);
+                if (coords) bounds.extend([coords.lng, coords.lat]);
+            });
+            map.current?.fitBounds(bounds, { padding: 50 });
         },
-        refresh: () => {
-            updateDriverMarkers();
-        },
-        flyToDriver: (driver) => {
-            const coords = getDriverCoordinates(driver);
-            if (coords && map.current) {
-                map.current.flyTo({ center: [coords.lng, coords.lat], zoom: 14 });
-            }
-        },
+        refresh: () => updateMarkers(),
+        flyTo: (lng, lat) => map.current?.flyTo({ center: [lng, lat], zoom: 14 }),
         getMap: () => map.current,
     }));
 
     // ✅ تهيئة الخريطة
     useEffect(() => {
         if (!mapContainer.current || map.current) return;
-
-        const initialCenter = getInitialCenter();
-
+        
+        // المركز الافتراضي
+        let defaultCenter = [2.1254, 13.5127]; // نيامي
+        
+        if (center?.lng && center?.lat) {
+            defaultCenter = [center.lng, center.lat];
+        } else if (userLocation?.lng && userLocation?.lat) {
+            defaultCenter = [userLocation.lng, userLocation.lat];
+        }
+        
         map.current = new mapboxgl.Map({
             container: mapContainer.current,
             style: 'mapbox://styles/mapbox/streets-v12',
-            center: initialCenter,
+            center: defaultCenter,
             zoom: zoom || 12,
         });
-
+        
         map.current.addControl(new mapboxgl.NavigationControl(), 'top-right');
         map.current.addControl(new mapboxgl.FullscreenControl());
-        map.current.addControl(new mapboxgl.ScaleControl(), 'bottom-right');
-
+        
         if (onZoomChange) {
-            map.current.on('zoomend', () => {
-                onZoomChange(map.current.getZoom());
-            });
+            map.current.on('zoomend', () => onZoomChange(map.current.getZoom()));
         }
-
+        
         map.current.on('load', () => {
-            if (fitBoundsOnLoad) {
-                fitBoundsToDrivers();
-            }
-            if (onMapReady) {
-                onMapReady(map.current);
-            }
+            if (onMapReady) onMapReady(map.current);
         });
-
+        
         return () => {
-            if (refreshIntervalRef.current) {
-                clearInterval(refreshIntervalRef.current);
-            }
-            Object.values(markers.current).forEach(marker => marker.remove());
-            markers.current = {};
+            if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
+            markers.current.forEach(m => m.remove());
+            markers.current = [];
             if (userMarker.current) userMarker.current.remove();
-            if (map.current) {
-                map.current.remove();
-                map.current = null;
-            }
+            if (map.current) { map.current.remove(); map.current = null; }
         };
     }, []);
 
     // ✅ تحديث العلامات عند تغيير المندوبين
     useEffect(() => {
         if (!map.current) return;
+        updateMarkers();
         
-        updateDriverMarkers();
-        
-        // إعداد التحديث الدوري
         if (refreshInterval > 0) {
-            if (refreshIntervalRef.current) {
-                clearInterval(refreshIntervalRef.current);
-            }
-            refreshIntervalRef.current = setInterval(updateDriverMarkers, refreshInterval);
+            if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
+            refreshIntervalRef.current = setInterval(() => {
+                if (map.current) updateMarkers();
+            }, refreshInterval);
         }
         
         return () => {
-            if (refreshIntervalRef.current) {
-                clearInterval(refreshIntervalRef.current);
-            }
+            if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
         };
-    }, [drivers, updateDriverMarkers, refreshInterval]);
+    }, [drivers, updateMarkers, refreshInterval]);
 
     // ✅ تحديث موقع المستخدم
     useEffect(() => {
@@ -309,15 +284,14 @@ const DriverLocationMap = forwardRef(({
         updateUserLocation();
     }, [userLocation, showUserLocation, updateUserLocation]);
 
-    // ✅ الطيران إلى المندوب المحدد
+    // ✅ التكبير للمندوب المحدد
     useEffect(() => {
         if (!map.current || !selectedDriver) return;
-        
         const coords = getDriverCoordinates(selectedDriver);
         if (coords) {
             map.current.flyTo({ center: [coords.lng, coords.lat], zoom: 14 });
         }
-    }, [selectedDriver]);
+    }, [selectedDriver, getDriverCoordinates]);
 
     return (
         <div

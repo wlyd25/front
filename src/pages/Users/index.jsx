@@ -122,6 +122,7 @@ export default function Users() {
   );
 
   const users = data?.data || [];
+  console.log(users)
   const totalCount = data?.pagination?.total || 0;
   const stats = data?.stats || {};
 

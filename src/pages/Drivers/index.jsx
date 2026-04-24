@@ -1,4 +1,4 @@
-// src/pages/Drivers/index.jsx - نسخة كاملة مع _id
+// src/pages/Drivers/index.jsx - النسخة المعدلة بالكامل لتدعم الحالات الجديدة
 
 import { useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
@@ -19,6 +19,8 @@ import {
   Rating,
   Alert,
   Snackbar,
+  Stack,
+  Divider,
 } from '@mui/material';
 import {
   Edit,
@@ -30,6 +32,10 @@ import {
   LocationOn,
   Block,
   CheckCircle,
+  Wifi,
+  WifiOff,
+  Circle,
+  DirectionsBike,
 } from '@mui/icons-material';
 import { driversService } from '../../api';
 import ResponsiveTable from '../../components/Common/ResponsiveTable';
@@ -42,6 +48,15 @@ import DriverLocation from './components/DriverLocation';
 import { formatDate, formatCurrency } from '../../utils/formatters';
 import { getReactKey, handleError } from '../../utils/helpers';
 
+// ✅ أيقونات الحالة
+const OnlineIcon = () => <Wifi fontSize="small" sx={{ color: '#4caf50' }} />;
+const OfflineIcon = () => <WifiOff fontSize="small" sx={{ color: '#9e9e9e' }} />;
+const AvailableIcon = () => <CheckCircle fontSize="small" sx={{ color: '#4caf50' }} />;
+const UnavailableIcon = () => <Block fontSize="small" sx={{ color: '#ff9800' }} />;
+const BusyIcon = () => <DirectionsBike fontSize="small" sx={{ color: '#ff9800' }} />;
+const ActiveIcon = () => <Circle fontSize="small" sx={{ color: '#4caf50' }} />;
+const InactiveIcon = () => <Circle fontSize="small" sx={{ color: '#f44336' }} />;
+
 export default function Drivers() {
   const { isMobile, fontSize, spacing } = useResponsive();
   const queryClient = useQueryClient();
@@ -50,8 +65,10 @@ export default function Drivers() {
   const [pageSize, setPageSize] = useState(isMobile ? 10 : 20);
   const [filters, setFilters] = useState({
     search: '',
-    status: 'all',
-    availability: 'all',
+    status: 'all',        // all, active, inactive
+    online: 'all',        // all, online, offline
+    availability: 'all',  // all, available, unavailable
+    verified: 'all',      // all, verified, unverified
   });
   const [selectedDriver, setSelectedDriver] = useState(null);
   const [openDetails, setOpenDetails] = useState(false);
@@ -59,6 +76,7 @@ export default function Drivers() {
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
+  // ✅ جلب بيانات المندوبين مع الحالة التفصيلية من الـ API الجديد
   const { data, isLoading, refetch, isFetching } = useQuery(
     ['drivers', page, pageSize, filters],
     () => driversService.getDrivers({
@@ -66,7 +84,9 @@ export default function Drivers() {
       limit: pageSize,
       search: filters.search || undefined,
       isActive: filters.status !== 'all' ? filters.status === 'active' : undefined,
-      isOnline: filters.availability !== 'all' ? filters.availability === 'online' : undefined,
+      isOnline: filters.online !== 'all' ? filters.online === 'online' : undefined,
+      isAvailable: filters.availability !== 'all' ? filters.availability === 'available' : undefined,
+      isVerified: filters.verified !== 'all' ? filters.verified === 'verified' : undefined,
     }),
     {
       keepPreviousData: true,
@@ -83,6 +103,7 @@ export default function Drivers() {
   const drivers = data?.data || [];
   const totalCount = data?.pagination?.total || 0;
 
+  // ✅ تحديث حالة المندوب (تفعيل/تعطيل الحساب)
   const updateStatusMutation = useMutation(
     ({ driverId, isActive }) => driversService.updateDriverStatus(driverId, { isActive }),
     {
@@ -96,6 +117,7 @@ export default function Drivers() {
     }
   );
 
+  // ✅ توثيق المندوب
   const verifyMutation = useMutation(
     (driverId) => driversService.verifyDriver(driverId),
     {
@@ -105,6 +127,21 @@ export default function Drivers() {
       },
       onError: (error) => {
         setSnackbar({ open: true, message: handleError(error, 'فشل توثيق المندوب'), severity: 'error' });
+      },
+    }
+  );
+
+  // ✅ فرض تحديث حالة التوفر (للاستخدام من قبل الأدمن)
+  const forceUpdateAvailabilityMutation = useMutation(
+    ({ driverId, isAvailable, reason }) => 
+      driversService.forceUpdateAvailability(driverId, { isAvailable, reason }),
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries('drivers');
+        setSnackbar({ open: true, message: 'تم تحديث حالة المندوب', severity: 'success' });
+      },
+      onError: (error) => {
+        setSnackbar({ open: true, message: handleError(error, 'فشل تحديث حالة المندوب'), severity: 'error' });
       },
     }
   );
@@ -127,42 +164,87 @@ export default function Drivers() {
     verifyMutation.mutate(driver._id);
   }, [verifyMutation]);
 
+  // ✅ فرض تغيير حالة التوفر
+  const handleForceAvailability = useCallback((driver, isAvailable) => {
+    forceUpdateAvailabilityMutation.mutate({ 
+      driverId: driver._id, 
+      isAvailable,
+      reason: `تم التحديث بواسطة الأدمن - ${new Date().toLocaleString()}`
+    });
+  }, [forceUpdateAvailabilityMutation]);
+
   const resetFilters = useCallback(() => {
     setFilters({
       search: '',
       status: 'all',
+      online: 'all',
       availability: 'all',
+      verified: 'all',
     });
     setPage(0);
   }, []);
 
+  // ✅ حساب الإحصائيات
   const statsCards = useMemo(() => {
-    const activeDrivers = drivers.filter(d => d.isActive).length;
-    const onlineDrivers = drivers.filter(d => d.isOnline).length;
-    const verifiedDrivers = drivers.filter(d => d.isVerified).length;
+    const activeDrivers = drivers.filter(d => d.isActive === true).length;
+    const onlineDrivers = drivers.filter(d => d.isOnline === true).length;
+    const availableDrivers = drivers.filter(d => d.driverInfo?.isAvailable === true && d.isOnline === true).length;
+    const verifiedDrivers = drivers.filter(d => d.isVerified === true).length;
+    const busyDrivers = drivers.filter(d => d.currentOrder !== null && d.currentOrder !== undefined).length;
     
     return [
       { title: 'إجمالي المندوبين', value: totalCount, icon: LocalShipping, color: '#2196f3' },
-      { title: 'مندوبين نشطين', value: activeDrivers, icon: CheckCircle, color: '#4caf50' },
-      { title: 'متصلون الآن', value: onlineDrivers, icon: LocationOn, color: '#ff9800' },
+      { title: 'مندوبين نشطين', value: activeDrivers, icon: ActiveIcon, color: '#4caf50' },
+      { title: 'متصلون الآن', value: onlineDrivers, icon: OnlineIcon, color: '#2196f3' },
+      { title: 'متاحون للطلبات', value: availableDrivers, icon: AvailableIcon, color: '#4caf50' },
+      { title: 'مشغولون', value: busyDrivers, icon: BusyIcon, color: '#ff9800' },
       { title: 'مندوبين موثقين', value: verifiedDrivers, icon: Verified, color: '#9c27b0' },
     ];
   }, [drivers, totalCount]);
 
+  // ✅ الحصول على لون حالة المندوب
+  const getDriverStatusColor = useCallback((driver) => {
+    const isActive = driver.isActive === true;
+    const isOnline = driver.isOnline === true;
+    const isAvailable = driver.driverInfo?.isAvailable === true;
+    const hasActiveOrder = driver.currentOrder !== null && driver.currentOrder !== undefined;
+
+    if (!isActive) return 'error';
+    if (!isOnline) return 'warning';
+    if (hasActiveOrder) return 'info';
+    if (isAvailable) return 'success';
+    return 'default';
+  }, []);
+
+  // ✅ الحصول على نص حالة المندوب
+  const getDriverStatusLabel = useCallback((driver) => {
+    const isActive = driver.isActive === true;
+    const isOnline = driver.isOnline === true;
+    const isAvailable = driver.driverInfo?.isAvailable === true;
+    const hasActiveOrder = driver.currentOrder !== null && driver.currentOrder !== undefined;
+
+    if (!isActive) return 'حساب معطل';
+    if (!isOnline) return 'غير متصل';
+    if (hasActiveOrder) return 'في توصيلة';
+    if (isAvailable) return 'متاح للطلبات';
+    return 'غير متاح';
+  }, []);
+
+  // ✅ أعمدة الجدول
   const columns = useMemo(() => [
     {
       field: 'avatar',
       headerName: '',
       width: 60,
       renderCell: (params) => (
-        <Avatar src={params.row.avatar} sx={{ width: 40, height: 40 }}>
+        <Avatar src={params.row.image} sx={{ width: 40, height: 40 }}>
           {params.row.name?.charAt(0)}
         </Avatar>
       ),
     },
     { field: 'name', headerName: 'الاسم', width: 150 },
-    { field: 'phone', headerName: 'رقم الهاتف', width: 150 },
-    { field: 'email', headerName: 'البريد الإلكتروني', width: 180 },
+    { field: 'phone', headerName: 'رقم الهاتف', width: 130 },
+    { field: 'email', headerName: 'البريد الإلكتروني', width: 200 },
     {
       field: 'rating',
       headerName: 'التقييم',
@@ -172,36 +254,57 @@ export default function Drivers() {
       ),
     },
     {
-      field: 'isOnline',
+      field: 'status',
       headerName: 'الحالة',
-      width: 100,
-      renderCell: (params) => (
-        <Chip 
-          label={params.value ? 'متصل' : 'غير متصل'} 
-          size="small" 
-          color={params.value ? 'success' : 'default'} 
-        />
-      ),
+      width: 130,
+      renderCell: (params) => {
+        const driver = params.row;
+        const statusLabel = getDriverStatusLabel(driver);
+        const statusColor = getDriverStatusColor(driver);
+        let icon = null;
+        
+        if (driver.isOnline === true && driver.driverInfo?.isAvailable === true && !driver.currentOrder) {
+          icon = <Wifi fontSize="small" sx={{ mr: 0.5 }} />;
+        } else if (driver.isOnline === true && driver.currentOrder) {
+          icon = <DirectionsBike fontSize="small" sx={{ mr: 0.5 }} />;
+        } else if (driver.isOnline === true && !driver.driverInfo?.isAvailable) {
+          icon = <Block fontSize="small" sx={{ mr: 0.5 }} />;
+        } else if (!driver.isOnline) {
+          icon = <WifiOff fontSize="small" sx={{ mr: 0.5 }} />;
+        }
+        
+        return (
+          <Chip 
+            label={statusLabel} 
+            size="small" 
+            color={statusColor}
+            icon={icon}
+          />
+        );
+      },
     },
     {
-      field: 'isActive',
-      headerName: 'نشط',
+      field: 'isVerified',
+      headerName: 'توثيق',
       width: 80,
       renderCell: (params) => (
-        <Chip 
-          label={params.value ? 'نشط' : 'غير نشط'} 
-          size="small" 
-          color={params.value ? 'success' : 'error'} 
-        />
+        params.value ? 
+          <Verified fontSize="small" color="primary" /> : 
+          <Block fontSize="small" color="disabled" />
       ),
     },
     {
       field: 'actions',
       headerName: 'الإجراءات',
-      width: 200,
+      width: 250,
       hideOnDesktop: false,
       renderCell: (params) => {
         const driver = params.row;
+        const isActive = driver.isActive === true;
+        const isOnline = driver.isOnline === true;
+        const isAvailable = driver.driverInfo?.isAvailable === true;
+        const hasActiveOrder = driver.currentOrder !== null;
+        
         return (
           <Box display="flex" gap={0.5}>
             <Tooltip title="عرض التفاصيل">
@@ -221,16 +324,28 @@ export default function Drivers() {
                 </IconButton>
               </Tooltip>
             )}
-            <Tooltip title={driver.isActive ? 'تعطيل' : 'تفعيل'}>
+            {/* ✅ زر فرض التغيير (للأدمن) - يظهر فقط للمندوبين المتصلين */}
+            {isOnline && !hasActiveOrder && (
+              <Tooltip title={isAvailable ? 'تعطيل الاستقبال' : 'تفعيل الاستقبال'}>
+                <IconButton 
+                  size="small" 
+                  onClick={() => handleForceAvailability(driver, !isAvailable)}
+                  color={isAvailable ? 'warning' : 'success'}
+                >
+                  {isAvailable ? <Block fontSize="small" /> : <CheckCircle fontSize="small" />}
+                </IconButton>
+              </Tooltip>
+            )}
+            <Tooltip title={isActive ? 'تعطيل الحساب' : 'تفعيل الحساب'}>
               <IconButton size="small" onClick={() => handleToggleStatus(driver)}>
-                {driver.isActive ? <Block fontSize="small" color="error" /> : <CheckCircle fontSize="small" color="success" />}
+                {isActive ? <Block fontSize="small" color="error" /> : <CheckCircle fontSize="small" color="success" />}
               </IconButton>
             </Tooltip>
           </Box>
         );
       },
     },
-  ], [handleViewDetails, handleViewLocation, handleVerify, handleToggleStatus]);
+  ], [handleViewDetails, handleViewLocation, handleVerify, handleToggleStatus, handleForceAvailability, getDriverStatusLabel, getDriverStatusColor]);
 
   return (
     <Box sx={{ p: spacing.page }}>
@@ -240,8 +355,8 @@ export default function Drivers() {
 
       <ResponsiveStatsCards 
         cards={statsCards} 
-        columnsDesktop={4} 
-        columnsTablet={2} 
+        columnsDesktop={6} 
+        columnsTablet={3} 
         columnsMobile={2} 
         spacing={spacing.section} 
       />
@@ -293,12 +408,40 @@ export default function Drivers() {
               select
               label="حالة الاتصال"
               size="small"
-              value={filters.availability}
-              onChange={(e) => setFilters({ ...filters, availability: e.target.value })}
+              value={filters.online}
+              onChange={(e) => setFilters({ ...filters, online: e.target.value })}
             >
               <MenuItem value="all">الكل</MenuItem>
               <MenuItem value="online">متصل</MenuItem>
               <MenuItem value="offline">غير متصل</MenuItem>
+            </TextField>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <TextField
+              fullWidth
+              select
+              label="حالة الاستقبال"
+              size="small"
+              value={filters.availability}
+              onChange={(e) => setFilters({ ...filters, availability: e.target.value })}
+            >
+              <MenuItem value="all">الكل</MenuItem>
+              <MenuItem value="available">متاح للطلبات</MenuItem>
+              <MenuItem value="unavailable">غير متاح</MenuItem>
+            </TextField>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <TextField
+              fullWidth
+              select
+              label="التوثيق"
+              size="small"
+              value={filters.verified}
+              onChange={(e) => setFilters({ ...filters, verified: e.target.value })}
+            >
+              <MenuItem value="all">الكل</MenuItem>
+              <MenuItem value="verified">موثق</MenuItem>
+              <MenuItem value="unverified">غير موثق</MenuItem>
             </TextField>
           </Grid>
         </ResponsiveFilters>
@@ -322,7 +465,7 @@ export default function Drivers() {
               }}
             >
               <Box display="flex" gap={2}>
-                <Avatar src={driver.avatar} sx={{ width: 50, height: 50 }}>
+                <Avatar src={driver.image} sx={{ width: 50, height: 50 }}>
                   {driver.name?.charAt(0)}
                 </Avatar>
                 <Box flex={1}>
@@ -331,9 +474,9 @@ export default function Drivers() {
                       {driver.name}
                     </Typography>
                     <Chip 
-                      label={driver.isOnline ? 'متصل' : 'غير متصل'} 
+                      label={getDriverStatusLabel(driver)} 
                       size="small" 
-                      color={driver.isOnline ? 'success' : 'default'} 
+                      color={getDriverStatusColor(driver)} 
                     />
                   </Box>
                   <Typography variant="caption" color="textSecondary" display="block">
@@ -343,6 +486,22 @@ export default function Drivers() {
                     <Rating value={driver.rating || 0} readOnly size="small" />
                     {driver.isVerified && <Verified fontSize="small" color="primary" />}
                   </Box>
+                </Box>
+              </Box>
+              <Divider sx={{ my: 1 }} />
+              <Box display="flex" justifyContent="space-between" alignItems="center">
+                <Box display="flex" gap={0.5}>
+                  <Chip 
+                    size="small" 
+                    label={driver.isOnline ? '🟢 متصل' : '⚫ غير متصل'} 
+                    variant="outlined"
+                  />
+                  {driver.driverInfo?.isAvailable && (
+                    <Chip size="small" label="✅ متاح" variant="outlined" color="success" />
+                  )}
+                  {driver.currentOrder && (
+                    <Chip size="small" label="🚚 مشغول" variant="outlined" color="warning" />
+                  )}
                 </Box>
               </Box>
               <Box display="flex" justifyContent="flex-end" gap={1} mt={1}>

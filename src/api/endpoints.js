@@ -43,7 +43,7 @@ export const adminEndpoints = {
   statsUsers: '/admin/stats/users',
   statsOrders: '/admin/stats/orders',
   statsRevenue: '/admin/stats/revenue',
-  
+  driversWithLocation: '/admin/drivers/locations',
   users: '/admin/users',
   userDetails: (id) => `/admin/users/${id}`,
   
@@ -174,4 +174,34 @@ export const getSafeValue = (obj, path, defaultValue = '') => {
   }
   
   return result !== undefined && result !== null ? result : defaultValue;
+};
+
+
+// src/api/endpoints.js - أضف هذه الدوال
+
+/**
+ * تحويل إحداثيات GeoJSON إلى كائن بسيط
+ * @param {Array} coordinates - [lng, lat]
+ * @returns {Object} - { lat, lng }
+ */
+export const geoJsonToLatLng = (coordinates) => {
+    if (!coordinates || !Array.isArray(coordinates) || coordinates.length < 2) {
+        return null;
+    }
+    return {
+        lng: parseFloat(coordinates[0]),
+        lat: parseFloat(coordinates[1])
+    };
+};
+
+/**
+ * تحويل كائن بسيط إلى إحداثيات GeoJSON
+ * @param {Object} latLng - { lat, lng }
+ * @returns {Array} - [lng, lat]
+ */
+export const latLngToGeoJson = (latLng) => {
+    if (!latLng || latLng.lat === undefined || latLng.lng === undefined) {
+        return null;
+    }
+    return [parseFloat(latLng.lng), parseFloat(latLng.lat)];
 };
